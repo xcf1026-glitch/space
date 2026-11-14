@@ -1,0 +1,2553 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>星際冒險群島：太空探索 3D 互動學習世界</title>
+  <!-- 載入 Tailwind CSS 與 FontAwesome 圖示庫 -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet" />
+
+  <!-- Import Map 設定 Three.js 與 OrbitControls -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: 'Noto Sans TC', sans-serif;
+      background: radial-gradient(circle at center, #141738 0%, #070818 100%);
+      color: #f8fafc;
+      user-select: none;
+    }
+    #canvas-container {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 1;
+      touch-action: none;
+    }
+    /* 自訂捲軸樣式 */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.4);
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(139, 92, 246, 0.5);
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(139, 92, 246, 0.8);
+    }
+    /* 玻璃擬態卡片 */
+    .glass-panel {
+      background: rgba(15, 19, 46, 0.84);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(167, 139, 250, 0.28);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+    }
+    .glass-card {
+      background: rgba(30, 36, 78, 0.65);
+      border: 1px solid rgba(139, 92, 246, 0.25);
+    }
+    /* 遊戲按鈕質感 */
+    .game-btn {
+      transition: all 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+      box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35);
+    }
+    .game-btn:hover:not(:disabled) {
+      transform: translateY(-2px);
+      filter: brightness(1.08);
+    }
+    .game-btn:active:not(:disabled) {
+      transform: translateY(2px);
+      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+    }
+    /* 面板滑動過渡 */
+    #left-sidebar {
+      transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s ease;
+    }
+    #left-sidebar.collapsed {
+      transform: translateX(-110%);
+      opacity: 0;
+      pointer-events: none;
+    }
+    #right-panel {
+      transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s ease;
+    }
+    #right-panel.hidden-panel {
+      transform: translateX(110%);
+      opacity: 0;
+      pointer-events: none;
+    }
+    @media (max-width: 768px) {
+      #right-panel.hidden-panel {
+        transform: translateY(110%);
+      }
+    }
+    /* 訊息提示框動畫 */
+    @keyframes popIn {
+      0% { transform: translate(-50%, -20px) scale(0.9); opacity: 0; }
+      100% { transform: translate(-50%, 0) scale(1); opacity: 1; }
+    }
+    .toast-anim {
+      animation: popIn 0.28s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 3D WebGL 畫布容器 -->
+  <div id="canvas-container"></div>
+
+  <!-- 頂部訊息通知條 (取代 alert) -->
+  <div id="toast-container" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 pointer-events-none flex flex-col items-center gap-2 w-11/12 max-w-md"></div>
+
+  <!-- 左側收合後的展開按鈕 -->
+  <button id="expand-left-btn" onclick="toggleLeftSidebar(false)"
+    class="hidden fixed top-4 left-4 z-30 glass-panel game-btn px-4 py-3 rounded-2xl text-amber-300 font-bold flex items-center gap-2 border border-purple-400/40">
+    <i class="fa-solid fa-rocket text-lg"></i>
+    <span>展開探索選單</span>
+  </button>
+
+  <!-- 左側控制與任務護照面板 -->
+  <aside id="left-sidebar"
+    class="fixed top-3 left-3 bottom-3 w-[330px] max-w-[88vw] z-30 glass-panel rounded-3xl flex flex-col overflow-hidden">
+    
+    <!-- 頂部標題與一鍵收合按鈕 -->
+    <div class="p-4 bg-gradient-to-r from-indigo-900/90 via-purple-900/80 to-slate-900/90 border-b border-purple-400/25 flex items-center justify-between">
+      <div class="flex items-center gap-2.5">
+        <div class="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-slate-950 font-black text-xl shadow-lg">
+          <i class="fa-solid fa-shuttle-space"></i>
+        </div>
+        <div>
+          <h1 class="font-black text-base tracking-wide text-white leading-tight">星際冒險群島</h1>
+          <p class="text-xs text-purple-200 font-medium">太空探索 3D 互動學習世界</p>
+        </div>
+      </div>
+      <button onclick="toggleLeftSidebar(true)" title="收合左側選單"
+        class="game-btn w-9 h-9 rounded-xl bg-slate-800/80 hover:bg-purple-700/80 text-purple-200 flex items-center justify-center border border-purple-400/30">
+        <i class="fa-solid fa-angles-left"></i>
+      </button>
+    </div>
+
+    <!-- 可捲動內容區 -->
+    <div class="flex-1 overflow-y-auto p-4 space-y-4">
+      
+      <!-- 任務護照進度卡片 -->
+      <div class="glass-card rounded-2xl p-3.5">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-sm font-bold text-amber-300 flex items-center gap-1.5">
+            <i class="fa-solid fa-passport"></i> 太空探索任務護照
+          </span>
+          <span id="progress-percent" class="text-xs font-black px-2 py-0.5 rounded-full bg-purple-600/60 text-white">0%</span>
+        </div>
+        <!-- 進度條 -->
+        <div class="w-full h-3 bg-slate-900/90 rounded-full overflow-hidden p-0.5 border border-purple-500/30 mb-2.5">
+          <div id="progress-bar" class="h-full bg-gradient-to-r from-cyan-400 via-purple-400 to-amber-400 rounded-full transition-all duration-500" style="width: 0%"></div>
+        </div>
+        <div class="flex justify-between text-xs text-slate-300 mb-3">
+          <span>已完成島嶼：<strong id="completed-count" class="text-cyan-300">0</strong> / 10</span>
+          <span>待探索：<strong id="remaining-count" class="text-amber-300">10</strong></span>
+        </div>
+        <!-- 10 枚成就徽章網格 -->
+        <div id="badges-grid" class="grid grid-cols-5 gap-2"></div>
+        <p class="text-[11px] text-slate-400 mt-2.5 flex items-center gap-1">
+          <i class="fa-solid fa-floppy-disk text-purple-400"></i> 進度自動儲存在此裝置瀏覽器中
+        </p>
+      </div>
+
+      <!-- 島嶼快速導航清單 -->
+      <div class="glass-card rounded-2xl p-3.5">
+        <div class="flex items-center justify-between mb-2">
+          <h2 class="text-sm font-bold text-cyan-300 flex items-center gap-1.5">
+            <i class="fa-solid fa-planet-ringed fa-globe"></i> 10 座太空浮空島
+          </h2>
+          <button onclick="resetCameraOverview()" class="text-xs text-purple-300 hover:text-white underline">
+            俯瞰全星系
+          </button>
+        </div>
+        <div id="island-list" class="space-y-1.5 max-h-48 overflow-y-auto pr-1"></div>
+      </div>
+
+      <!-- 自動導覽控制區 -->
+      <div class="glass-card rounded-2xl p-3.5">
+        <h2 class="text-sm font-bold text-emerald-300 flex items-center gap-1.5 mb-2.5">
+          <i class="fa-solid fa-route"></i> 星際自動導覽列車
+        </h2>
+        <div id="tour-idle-controls">
+          <button onclick="startAutoTour()"
+            class="game-btn w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-bold text-sm flex items-center justify-center gap-2">
+            <i class="fa-solid fa-play"></i> 開始全群島自動導覽
+          </button>
+        </div>
+        <div id="tour-active-controls" class="hidden space-y-2">
+          <div class="text-xs text-center bg-slate-900/70 py-1.5 px-2 rounded-lg text-emerald-300 font-medium" id="tour-status-text">
+            導覽中：俯瞰群島
+          </div>
+          <div class="grid grid-cols-4 gap-1.5">
+            <button onclick="tourStep(-1)" title="上一座" class="game-btn py-2 rounded-xl bg-slate-700 text-white text-xs font-bold">
+              <i class="fa-solid fa-backward-step"></i>
+            </button>
+            <button id="tour-pause-btn" onclick="togglePauseTour()" title="暫停/繼續" class="game-btn py-2 rounded-xl bg-amber-500 text-slate-950 text-xs font-bold">
+              <i class="fa-solid fa-pause"></i>
+            </button>
+            <button onclick="tourStep(1)" title="下一座" class="game-btn py-2 rounded-xl bg-slate-700 text-white text-xs font-bold">
+              <i class="fa-solid fa-forward-step"></i>
+            </button>
+            <button onclick="stopAutoTour()" title="結束導覽" class="game-btn py-2 rounded-xl bg-rose-600 text-white text-xs font-bold">
+              <i class="fa-solid fa-stop"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 工具模式切換入口 -->
+      <div class="grid grid-cols-2 gap-2">
+        <button onclick="openRightMode('build')"
+          class="game-btn py-3 px-3 rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-700 text-white font-bold text-xs flex flex-col items-center gap-1 border border-violet-400/30">
+          <i class="fa-solid fa-hammer text-lg text-amber-300"></i>
+          <span>創意建造工坊</span>
+        </button>
+        <button onclick="openRightMode('bridge')"
+          class="game-btn py-3 px-3 rounded-2xl bg-gradient-to-br from-cyan-600 to-blue-700 text-white font-bold text-xs flex flex-col items-center gap-1 border border-cyan-400/30">
+          <i class="fa-solid fa-bridge text-lg text-cyan-200"></i>
+          <span>星際橋梁系統</span>
+        </button>
+      </div>
+
+      <!-- 畫質與操作說明 -->
+      <div class="glass-card rounded-2xl p-3 text-xs text-slate-300 space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="font-bold text-purple-200"><i class="fa-solid fa-sliders"></i> 3D 畫質模式</span>
+          <button id="quality-toggle-btn" onclick="toggleQualityMode()"
+            class="px-2.5 py-1 rounded-lg bg-purple-700/70 hover:bg-purple-600 text-white font-bold text-[11px]">
+            目前：高畫質
+          </button>
+        </div>
+        <p class="text-[11px] leading-relaxed text-slate-300">
+          💡 <strong>操作提示：</strong>單指/左鍵拖曳旋轉，雙指/滾輪縮放，點擊島嶼查看 NASA/ESA 真實太空資料與問答，點擊太空人可進行對話！
+        </p>
+      </div>
+    </div>
+  </aside>
+
+  <!-- 右側多功能浮動面板 (島嶼百科/問答 / NPC 對話 / 建造工坊 / 橋梁連接) -->
+  <aside id="right-panel"
+    class="hidden-panel fixed top-3 right-3 bottom-3 w-[380px] max-w-[92vw] z-30 glass-panel rounded-3xl flex flex-col overflow-hidden">
+    
+    <!-- 右側面板頂部導覽列 -->
+    <div class="p-3.5 bg-gradient-to-r from-slate-900/90 via-indigo-950/90 to-purple-900/90 border-b border-purple-400/25 flex items-center justify-between">
+      <div class="flex items-center gap-1.5">
+        <button id="tab-info-btn" onclick="switchRightTab('info')"
+          class="px-3 py-1.5 rounded-xl text-xs font-bold bg-purple-600 text-white transition">
+          <i class="fa-solid fa-book-open mr-1"></i>島嶼百科
+        </button>
+        <button id="tab-build-btn" onclick="switchRightTab('build')"
+          class="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-800/80 text-slate-300 hover:text-white transition">
+          <i class="fa-solid fa-cubes mr-1"></i>建造
+        </button>
+        <button id="tab-bridge-btn" onclick="switchRightTab('bridge')"
+          class="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-800/80 text-slate-300 hover:text-white transition">
+          <i class="fa-solid fa-link mr-1"></i>橋梁
+        </button>
+      </div>
+      <button onclick="closeRightPanel()" title="關閉面板"
+        class="game-btn w-8 h-8 rounded-xl bg-slate-800/90 hover:bg-rose-600 text-slate-200 flex items-center justify-center">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+
+    <!-- 1. 島嶼百科與互動任務視圖 -->
+    <div id="view-info" class="flex-1 overflow-y-auto p-4 space-y-4">
+      <!-- 動態填入島嶼或 NPC 資料 -->
+    </div>
+
+    <!-- 2. 島嶼創意建造工坊視圖 -->
+    <div id="view-build" class="hidden flex-1 overflow-y-auto p-4 space-y-4">
+      <div class="bg-indigo-950/70 border border-indigo-400/30 rounded-2xl p-3 text-xs text-indigo-200">
+        <p class="font-bold text-amber-300 mb-1"><i class="fa-solid fa-wand-magic-sparkles"></i> 3D 太空基地建造指南</p>
+        <p>點選下方物件後，移動滑鼠或手指至任一浮空島地面（綠色預覽代表可放置，紅色代表超出邊界或碰撞建築），點擊即可建造！</p>
+      </div>
+
+      <!-- 建造模式切換 (放置 vs 編輯已放置物件) -->
+      <div class="grid grid-cols-2 gap-2">
+        <button id="build-mode-place" onclick="setBuildSubMode('place')"
+          class="game-btn py-2 px-3 rounded-xl bg-emerald-600 text-white font-bold text-xs flex items-center justify-center gap-1.5">
+          <i class="fa-solid fa-plus-circle"></i> 新增放置模式
+        </button>
+        <button id="build-mode-edit" onclick="setBuildSubMode('edit')"
+          class="game-btn py-2 px-3 rounded-xl bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5">
+          <i class="fa-solid fa-up-down-left-right"></i> 選取/移動/旋轉
+        </button>
+      </div>
+
+      <!-- 物件選單網格 -->
+      <div>
+        <h3 class="text-xs font-bold text-purple-200 mb-2">選擇太空建築與裝飾物件：</h3>
+        <div id="build-items-grid" class="grid grid-cols-2 gap-2"></div>
+      </div>
+
+      <!-- 選取物件編輯控制區 -->
+      <div id="selected-prop-controls" class="hidden glass-card rounded-2xl p-3 space-y-2.5 border border-amber-400/40">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-amber-300" id="selected-prop-name">已選取物件</span>
+          <span class="text-[11px] text-slate-300">點擊島嶼其他處可移動</span>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <button onclick="rotateSelectedProp()"
+            class="game-btn py-2 px-3 rounded-xl bg-cyan-600 text-white font-bold text-xs flex items-center justify-center gap-1.5">
+            <i class="fa-solid fa-rotate-right"></i> 旋轉 45°
+          </button>
+          <button onclick="deleteSelectedProp()"
+            class="game-btn py-2 px-3 rounded-xl bg-rose-600 text-white font-bold text-xs flex items-center justify-center gap-1.5">
+            <i class="fa-solid fa-trash"></i> 刪除此物件
+          </button>
+        </div>
+      </div>
+
+      <!-- 撤銷/重做/清空/還原按鈕列 -->
+      <div class="glass-card rounded-2xl p-3 space-y-2">
+        <h3 class="text-xs font-bold text-slate-300">建造歷史與場景管理：</h3>
+        <div class="grid grid-cols-2 gap-2">
+          <button id="undo-btn" onclick="undoBuild()"
+            class="game-btn py-2 px-3 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 disabled:opacity-40">
+            <i class="fa-solid fa-rotate-left"></i> 撤銷上一步
+          </button>
+          <button id="redo-btn" onclick="redoBuild()"
+            class="game-btn py-2 px-3 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 disabled:opacity-40">
+            <i class="fa-solid fa-rotate-right"></i> 恢復下一步
+          </button>
+          <button onclick="clearAllCustomProps()"
+            class="game-btn py-2 px-3 rounded-xl bg-amber-600/90 hover:bg-amber-600 text-white font-bold text-xs flex items-center justify-center gap-1.5">
+            <i class="fa-solid fa-broom"></i> 清空自建物件
+          </button>
+          <button onclick="resetDefaultScene()"
+            class="game-btn py-2 px-3 rounded-xl bg-rose-700/90 hover:bg-rose-700 text-white font-bold text-xs flex items-center justify-center gap-1.5">
+            <i class="fa-solid fa-arrows-rotate"></i> 還原預設場景
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. 星際橋梁與島嶼連接系統視圖 -->
+    <div id="view-bridge" class="hidden flex-1 overflow-y-auto p-4 space-y-4">
+      <div class="bg-cyan-950/70 border border-cyan-400/30 rounded-2xl p-3 text-xs text-cyan-100 space-y-1.5">
+        <p class="font-bold text-amber-300"><i class="fa-solid fa-bridge-water"></i> 星際光束橋梁連接系統</p>
+        <p>1. 點擊下方「啟動橋梁連接器」。</p>
+        <p>2. 在 3D 畫面中依序點擊<strong>第一座島</strong>與<strong>第二座島</strong>（距離需在 42 單位內）。</p>
+        <p>3. 橋梁建立後，兩座島上的<strong>太空人 NPC 會自動走過橋梁互相拜訪</strong>！</p>
+      </div>
+
+      <button id="toggle-bridge-tool-btn" onclick="toggleBridgeCreationMode()"
+        class="game-btn w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold text-sm flex items-center justify-center gap-2">
+        <i class="fa-solid fa-wand-sparkles"></i> <span>啟動橋梁連接器</span>
+      </button>
+
+      <div id="bridge-step-indicator" class="hidden glass-card rounded-2xl p-3 text-center border border-cyan-400/50">
+        <p class="text-xs text-cyan-300 font-bold" id="bridge-step-text">請在 3D 畫面點擊「起點島嶼」</p>
+      </div>
+
+      <div class="glass-card rounded-2xl p-3.5 space-y-2.5">
+        <div class="flex items-center justify-between">
+          <h3 class="text-xs font-bold text-purple-200">已建立的星際橋梁 (<span id="bridge-count">0</span>)</h3>
+          <span class="text-[11px] text-slate-400">可刪除以更新路線</span>
+        </div>
+        <div id="bridge-list" class="space-y-2">
+          <p class="text-xs text-slate-400 text-center py-3">尚未建立任何星際橋梁</p>
+        </div>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- 模組化資料與 3D 引擎主程式 -->
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // =========================================================================
+    // 第一階段：太空探索真實研究資料庫 (分離式結構，包含真實來源與 Wikimedia 圖片)
+    // =========================================================================
+    const SPACE_ISLANDS_DATA = [
+      {
+        id: 'iss',
+        name: '國際太空站軌道港',
+        enName: 'ISS Orbital Port',
+        position: { x: 0, y: 1.5, z: 0 },
+        radius: 6.2,
+        height: 3.4,
+        themeColor: '#38bdf8',
+        groundColor: '#334155',
+        rockColor: '#1e293b',
+        buildingType: 'iss_station',
+        badgeIcon: '🛰️',
+        badgeName: '軌道工程師',
+        summary: '國際太空站（ISS）是人類在低地球軌道上建造的最大規模太空研究實驗室，距離地表約 400 公里，每 90 分鐘繞行地球一圈，由 NASA、ESA、JAXA、Roscosmos 與 CSA 共同營運。',
+        background: '自 1998 年首個組件「曙光號」發射升空以來，國際太空站已連續超過 20 年有太空人常駐工作。太空人在微重力環境下進行生物學、物理學、天文學與新材料科學實驗，為未來人類前往月球與火星的長期太空任務累積關鍵健康與生命維持數據。',
+        funFact: '因為太空站以每秒約 7.66 公里的超高速繞地球飛行，太空人每天可以看到 16 次日出和日落！',
+        photoUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/04/International_Space_Station_after_undocking_of_STS-132.jpg/640px-International_Space_Station_after_undocking_of_STS-132.jpg',
+        photoCredit: 'NASA / STS-132 Crew (Public Domain, Wikimedia Commons)',
+        sourceName: 'NASA International Space Station 官方網站',
+        sourceUrl: 'https://www.nasa.gov/international-space-station/',
+        quiz: {
+          question: '國際太空站（ISS）大約每隔多久會繞行地球一圈？',
+          options: ['每 90 分鐘一圈', '每 24 小時一圈', '每 7 天一圈'],
+          answerIndex: 0,
+          explanation: '國際太空站以時速約 28,000 公里飛行，約 90 分鐘就能繞地球一圈！'
+        },
+        npcs: [
+          { name: '指揮官艾莉絲', role: '軌道站長', color: '#f8fafc', visor: '#38bdf8', greeting: '歡迎來到離地 400 公里的國際太空站！這裡每天能看到 16 次日出喔！' },
+          { name: '工程師里歐', role: '機械臂操作員', color: '#fb923c', visor: '#fef08a', greeting: '我正在檢查太陽能電池陣列，它為整個太空站提供源源不絕的電力。' }
+        ]
+      },
+      {
+        id: 'apollo',
+        name: '阿波羅寧靜海月球基地',
+        enName: 'Apollo Tranquility Base',
+        position: { x: -18, y: 0.5, z: -12 },
+        radius: 5.8,
+        height: 3.0,
+        themeColor: '#facc15',
+        groundColor: '#94a3b8',
+        rockColor: '#475569',
+        buildingType: 'apollo_lander',
+        badgeIcon: '🌕',
+        badgeName: '登月先鋒',
+        summary: '1969 年 7 月 20 日，NASA 阿波羅 11 號登月艇「鷹號」成功降落在月球寧靜海。太空人尼爾·阿姆斯壯與巴茲·奧爾德林成為首批踏上地球以外天體的人類。',
+        background: '阿波羅計畫共將 12 名太空人送上月球表面，並帶回約 382 公斤的月球岩石與土壤樣本。科學家透過分析這些珍貴月岩，證實月球大約在 45 億年前由地球與一顆火星大小天體撞擊後的碎片凝聚形成。',
+        funFact: '月球上沒有風也沒有雨水沖刷，因此阿波羅太空人留在月球表面的靴印可以保存數百萬年！',
+        photoUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/98/Aldrin_Apollo_11_original.jpg/640px-Aldrin_Apollo_11_original.jpg',
+        photoCredit: 'Neil Armstrong / NASA (Public Domain, Wikimedia Commons)',
+        sourceName: 'NASA Apollo 11 Mission Overview',
+        sourceUrl: 'https://www.nasa.gov/mission/apollo-11/',
+        quiz: {
+          question: '人類歷史上第一次成功載人登陸月球是哪一年？',
+          options: ['1957 年', '1969 年', '1981 年'],
+          answerIndex: 1,
+          explanation: '1969 年 7 月 20 日，阿波羅 11 號成功登陸月球寧靜海。'
+        },
+        npcs: [
+          { name: '阿姆斯壯博士', role: '登月指揮官', color: '#e2e8f0', visor: '#facc15', greeting: '這是一個人的一小步，卻是全人類的一大步！試試看月球只有地球六分之一的重力吧！' },
+          { name: '地質學家小美', role: '月岩採集員', color: '#38bdf8', visor: '#fef08a', greeting: '我正帶著月震儀和反射鏡進行測量，我們可以從地球用雷射精準測量地月距離！' }
+        ]
+      },
+      {
+        id: 'mars',
+        name: '毅力號火星耶澤羅基地',
+        enName: 'Mars Jezero Crater',
+        position: { x: 18, y: 2.2, z: -11 },
+        radius: 6.0,
+        height: 3.3,
+        themeColor: '#f97316',
+        groundColor: '#c2410c',
+        rockColor: '#7c2d12',
+        buildingType: 'mars_rover',
+        badgeIcon: '🔴',
+        badgeName: '紅色星球探險家',
+        summary: 'NASA「毅力號」（Perseverance）火星探測車於 2021 年 2 月降落在火星耶澤羅隕石坑，探索遠古湖泊三角洲遺蹟並封存岩石樣本，同時攜帶了「機智號」無人直升機。',
+        background: '耶澤羅隕石坑在數十億年前曾是一座充滿液態水的古老湖泊。毅力號配備 7 種精密科學儀器與 MOXIE 制氧實驗裝置，成功將火星大氣中的二氧化碳轉化為純氧，驗證未來人類登陸火星就地製造氧氣與燃料的可行性。',
+        funFact: '隨毅力號前往火星的「機智號」（Ingenuity）完成了人類史上首次在地球以外行星的動力受控飛行！',
+        photoUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a4/Perseverance-Selfie-at-Rochette-Horizontal-V2.gif/640px-Perseverance-Selfie-at-Rochette-Horizontal-V2.gif',
+        photoCredit: 'NASA / JPL-Caltech / MSSS (Public Domain, Wikimedia Commons)',
+        sourceName: 'NASA Mars 2020 Perseverance Rover',
+        sourceUrl: 'https://science.nasa.gov/mission/mars-2020-perseverance/',
+        quiz: {
+          question: '隨毅力號一起抵達火星並完成地外行星首次動力飛行的直升機叫什麼名字？',
+          options: ['機智號 (Ingenuity)', '好奇號 (Curiosity)', '洞察號 (InSight)'],
+          answerIndex: 0,
+          explanation: '機智號（Ingenuity）在稀薄的火星大氣中成功完成高達 72 次飛行任務！'
+        },
+        npcs: [
+          { name: '探險家馬克斯', role: '火星車駕駛員', color: '#fdba74', visor: '#38bdf8', greeting: '火星的天空在黃昏時會呈現迷人的藍灰色，與地球完全相反喔！' },
+          { name: '生物學家諾亞', role: '樣本封存專家', color: '#fef08a', visor: '#f97316', greeting: '我們正在耶澤羅古河床尋找遠古微生物存在的化學線索。' }
+        ]
+      },
+      {
+        id: 'jwst',
+        name: '詹姆斯·韋伯深空觀測站',
+        enName: 'James Webb Observatory',
+        position: { x: -24, y: 3.0, z: 8 },
+        radius: 5.5,
+        height: 2.9,
+        themeColor: '#eab308',
+        groundColor: '#1e1b4b',
+        rockColor: '#312e81',
+        buildingType: 'jwst_telescope',
+        badgeIcon: '🔭',
+        badgeName: '深空時光觀測者',
+        summary: '詹姆斯·韋伯太空望遠鏡（JWST）是人類史上最強大的紅外線太空望遠鏡，由 NASA、ESA 與 CSA 合作研發，部署在距離地球 150 萬公里的日地拉格朗日點 L2。',
+        background: '韋伯望遠鏡擁有直徑 6.5 公尺、由 18 片鍍金六角形鈹金屬鏡片組成的巨大主鏡，以及五層網球場大小的隔熱罩。它能穿透宇宙塵埃，觀測 135 億年前宇宙大爆炸後誕生的第一批星系與系外行星大氣成分。',
+        funFact: '韋伯望遠鏡的鏡面表面鍍有一層極薄的純黃金（僅約 100 奈米厚），因為黃金反射紅外線的效率極高！',
+        photoUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/88/JWST_spacecraft_model_2.png/640px-JWST_spacecraft_model_2.png',
+        photoCredit: 'NASA / Northrop Grumman (Public Domain, Wikimedia Commons)',
+        sourceName: 'NASA James Webb Space Telescope',
+        sourceUrl: 'https://science.nasa.gov/mission/webb/',
+        quiz: {
+          question: '詹姆斯·韋伯太空望遠鏡的主鏡是由幾片六角形鍍金鏡片組合而成的？',
+          options: ['6 片', '18 片', '36 片'],
+          answerIndex: 1,
+          explanation: '韋伯望遠鏡由 18 片可折疊展開的六角形鍍金鏡片組成 6.5 公尺主鏡。'
+        },
+        npcs: [
+          { name: '天文學家星語', role: '紅外線觀測員', color: '#fde047', visor: '#4f46e5', greeting: '透過紅外線之眼，我們能看見穿越 135 億光年而來的古老星光！' },
+          { name: '光學師凱文', role: '鏡面校準師', color: '#c4b5fd', visor: '#facc15', greeting: '這 18 片黃金鏡面的對準精度必須達到人類頭髮直徑的萬分之一！' }
+        ]
+      },
+      {
+        id: 'voyager',
+        name: '航海家星際邊界前哨',
+        enName: 'Voyager Interstellar Outpost',
+        position: { x: 24, y: 2.6, z: 9 },
+        radius: 5.4,
+        height: 2.8,
+        themeColor: '#a855f7',
+        groundColor: '#2e1065',
+        rockColor: '#4c1d95',
+        buildingType: 'voyager_probe',
+        badgeIcon: '📀',
+        badgeName: '星際信使',
+        summary: '1977 年發射的 NASA「航海家 1 號」與「航海家 2 號」是人類飛行最遠的太空探測器，兩者皆已飛越太陽圈邊界進入真正的星際空間，目前距離地球超過 240 億公里。',
+        background: '航海家號利用百年一遇的行星幾何排列，完成了對木星、土星、天王星與海王星的壯麗拜訪。兩艘探測器各自攜帶一張鍍金銅質「航海家金唱片」，收錄了地球 55 種語言問候語、自然界聲音、音樂與科學圖像。',
+        funFact: '1990 年航海家 1 號回頭拍攝了著名的《暗淡藍點》照片，整顆地球在陽光光束中只佔了不到 0.12 個像素！',
+        photoUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/d2/Voyager_spacecraft_model.png/640px-Voyager_spacecraft_model.png',
+        photoCredit: 'NASA / JPL (Public Domain, Wikimedia Commons)',
+        sourceName: 'NASA Voyager Interstellar Mission',
+        sourceUrl: 'https://science.nasa.gov/mission/voyager/',
+        quiz: {
+          question: '航海家 1 號與 2 號探測器上攜帶的「金唱片」主要用途是什麼？',
+          options: ['儲存太陽能電力', '向地外智慧生命傳遞地球文化與問候', '用來反射雷達波導航'],
+          answerIndex: 1,
+          explanation: '航海家金唱片收錄了地球的聲音、音樂與人類問候，如同寄往宇宙的瓶中信。'
+        },
+        npcs: [
+          { name: '領航員卡爾', role: '深空通訊員', color: '#d8b4fe', visor: '#38bdf8', greeting: '航海家 1 號發出的無線電訊號，需要飛越超過 22 小時才能抵達地球！' },
+          { name: '檔案員莉娜', role: '金唱片守護者', color: '#f472b6', visor: '#fef08a', greeting: '金唱片的封套上刻有氫原子躍遷時鐘與脈衝星地圖，指引地球在銀河系的位置。' }
+        ]
+      },
+      {
+        id: 'cassini',
+        name: '卡西尼土星環研究站',
+        enName: 'Cassini Saturn Station',
+        position: { x: -12, y: -1.2, z: 21 },
+        radius: 5.7,
+        height: 3.1,
+        themeColor: '#fcd34d',
+        groundColor: '#78350f',
+        rockColor: '#451a03',
+        buildingType: 'saturn_observatory',
+        badgeIcon: '🪐',
+        badgeName: '星環探索者',
+        summary: '卡西尼－惠更斯號是 NASA、ESA 與義大利太空總署合作的土星探測任務，2004 年進入土星軌道運行長達 13 年，並釋放惠更斯號成功著陸於土衛六「泰坦」。',
+        background: '卡西尼號揭開了土星環是由無數水冰與岩石微粒組成的奧秘，並發現土衛二「恩克拉多斯」南極噴發含有水蒸氣與有機分子的冰泉，顯示其冰層下方極可能存在適宜生命孕育的全球性液態海洋。',
+        funFact: '土星的平均密度比水還要小，如果宇宙中有一個足夠巨大的浴缸，土星會漂浮在水面上！',
+        photoUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c7/Saturn_during_Equinox.jpg/640px-Saturn_during_Equinox.jpg',
+        photoCredit: 'NASA / JPL / Space Science Institute (Public Domain, Wikimedia Commons)',
+        sourceName: 'NASA Cassini at Saturn',
+        sourceUrl: 'https://science.nasa.gov/mission/cassini/',
+        quiz: {
+          question: '卡西尼任務釋放的「惠更斯號」探測器成功降落在土星的哪一顆衛星上？',
+          options: ['土衛六（泰坦 Titan）', '木衛二（歐羅巴）', '火衛一（弗伯斯）'],
+          answerIndex: 0,
+          explanation: '惠更斯號於 2005 年成功登陸擁有濃厚大氣與液態甲烷湖泊的土衛六泰坦。'
+        },
+        npcs: [
+          { name: '行星學家泰坦', role: '星環分析師', color: '#fde68a', visor: '#0ea5e9', greeting: '土星環寬達數十萬公里，但平均厚度竟然只有幾十公尺呢！' },
+          { name: '冰泉研究員雪莉', role: '衛星探測員', color: '#67e8f9', visor: '#facc15', greeting: '土衛二的地下海洋噴出的冰晶直接補充了土星的 E 環！' }
+        ]
+      },
+      {
+        id: 'ryugu',
+        name: '隼鳥二號龍宮小行星採礦場',
+        enName: 'Hayabusa2 Ryugu Mine',
+        position: { x: 13, y: -1.0, z: 21 },
+        radius: 5.5,
+        height: 3.0,
+        themeColor: '#34d399',
+        groundColor: '#374151',
+        rockColor: '#111827',
+        buildingType: 'asteroid_mine',
+        badgeIcon: '💎',
+        badgeName: '小行星採樣大師',
+        summary: '日本宇宙航空研究開發機構（JAXA）的「隼鳥二號」探測器於 2018 年抵達近地小行星「龍宮」（Ryugu），成功採集地表與地下岩石樣本並於 2020 年安全送回地球。',
+        background: '龍宮是一顆富含碳質的 C 型小行星，保留了 46 億年前太陽系誕生初期的原始物質。科學家在隼鳥二號帶回的 5.4 克珍貴樣本中發現了超過 20 種氨基酸，為地球生命起源的有機物來源提供了重要證據。',
+        funFact: '龍宮小行星的形狀像一顆旋轉的陀螺，因為重力極弱，在上面輕輕跳一下就可能飛離小行星！',
+        photoUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ea/Ryugu_rotation.gif/640px-Ryugu_rotation.gif',
+        photoCredit: 'JAXA, University of Tokyo, et al. (CC BY 4.0, Wikimedia Commons)',
+        sourceName: 'JAXA Hayabusa2 Project 官方網站',
+        sourceUrl: 'https://www.hayabusa2.jaxa.jp/en/',
+        quiz: {
+          question: '研發「隼鳥二號」並成功從龍宮小行星帶回樣本的是哪個太空機構？',
+          options: ['JAXA（日本宇宙航空研究開發機構）', 'CSA（加拿大太空總署）', 'ISRO（印度太空研究組織）'],
+          answerIndex: 0,
+          explanation: 'JAXA 的隼鳥二號於 2020 年 12 月成功將龍宮樣本艙投遞回澳洲沙漠。'
+        },
+        npcs: [
+          { name: '採樣師健太', role: '小行星工程師', color: '#6ee7b7', visor: '#1e293b', greeting: '我們在龍宮樣本中發現了構成蛋白質的氨基酸，這是太陽系最古老的秘密！' },
+          { name: '機器人小隼', role: '礦石分析機', color: '#94a3b8', visor: '#34d399', greeting: '嗶嗶！龍宮表面布滿了碎石，重力只有地球的八萬分之一！' }
+        ]
+      },
+      {
+        id: 'artemis',
+        name: '阿提米絲南極水冰基地',
+        enName: 'Artemis Lunar South Pole',
+        position: { x: 0, y: 1.8, z: -24 },
+        radius: 5.9,
+        height: 3.2,
+        themeColor: '#60a5fa',
+        groundColor: '#cbd5e1',
+        rockColor: '#64748b',
+        buildingType: 'artemis_dome',
+        badgeIcon: '🧊',
+        badgeName: '月面基地建築師',
+        summary: 'NASA「阿提米絲」（Artemis）計畫旨在重返月球並建立長期永續駐留基地，目標鎖定月球南極，利用永久陰影區蘊藏的水冰資源製造飲用水、氧氣與火箭推進劑。',
+        background: '阿提米絲計畫結合獵戶座太空船（Orion）、太空發射系統（SLS）以及繞月「月球門戶」（Lunar Gateway）太空站，將成為人類未來前往火星載人任務的重要跳板與深空訓練基地。',
+        funFact: '在希臘神話中，阿提米絲（Artemis）正是太陽神阿波羅（Apollo）的雙胞胎姊姊！',
+        photoUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e1/Artemis_I_SLS_liftoff.jpg/640px-Artemis_I_SLS_liftoff.jpg',
+        photoCredit: 'NASA / Joel Kowsky (Public Domain, Wikimedia Commons)',
+        sourceName: 'NASA Artemis Program',
+        sourceUrl: 'https://www.nasa.gov/humans-in-space/artemis/',
+        quiz: {
+          question: '阿提米絲計畫選擇在「月球南極」建立基地的主要原因是什麼？',
+          options: ['那裡有茂密的森林', '永久陰影隕石坑中蘊藏珍貴的水冰資源', '那裡離太陽最近'],
+          answerIndex: 1,
+          explanation: '月球南極的水冰可分解為氧氣與氫氣，作為太空人呼吸與火箭燃料。'
+        },
+        npcs: [
+          { name: '基地長蘇菲', role: '極地資源總監', color: '#93c5fd', visor: '#facc15', greeting: '把月球南極的水冰電解後，就能獲得呼吸用的氧氣和火箭用的液態氫！' },
+          { name: '建築師阿明', role: '月壤 3D 列印師', color: '#f8fafc', visor: '#3b82f6', greeting: '我們直接利用月球表面的風化層塵土 3D 列印防輻射居住艙！' }
+        ]
+      },
+      {
+        id: 'hubble',
+        name: '哈伯太空望遠鏡修復港',
+        enName: 'Hubble Telescope Dock',
+        position: { x: -25, y: -0.8, z: -3 },
+        radius: 5.3,
+        height: 2.8,
+        themeColor: '#f472b6',
+        groundColor: '#1e293b',
+        rockColor: '#0f172a',
+        buildingType: 'hubble_dock',
+        badgeIcon: '🌌',
+        badgeName: '星雲攝影師',
+        summary: '哈伯太空望遠鏡（Hubble Space Telescope）於 1990 年發射，運行在地球大氣層上方約 540 公里的軌道，徹底改變了人類對宇宙年齡、黑洞與星系演化的認知。',
+        background: '因為避開了地球大氣層的擾動，哈伯能拍攝出極度清晰的可見光與紫外線宇宙影像，例如著名的《創生之柱》與《哈伯超深空場》，並幫助天文學家精確測定出宇宙年齡約為 138 億年。',
+        funFact: '哈伯望遠鏡是唯一設計成可由太空人在太空中直接進行維修與升級零件的太空望遠鏡，前後共經歷了 5 次太空梭維修任務！',
+        photoUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/3f/HST-SM4.jpeg/640px-HST-SM4.jpeg',
+        photoCredit: 'NASA / STS-125 Crew (Public Domain, Wikimedia Commons)',
+        sourceName: 'NASA Hubble Space Telescope',
+        sourceUrl: 'https://science.nasa.gov/mission/hubble/',
+        quiz: {
+          question: '為什麼哈伯太空望遠鏡拍攝的星空照片比地面望遠鏡清晰得多？',
+          options: ['因為它位於地球大氣層之外，不受大氣擾動影響', '因為它距離星星只有幾公里', '因為它使用普通手機鏡頭'],
+          answerIndex: 0,
+          explanation: '地球大氣層會讓星光閃爍模糊，太空中則能捕捉最純淨銳利的宇宙影像。'
+        },
+        npcs: [
+          { name: '維修員傑克', role: '太空漫步技師', color: '#f9a8d4', visor: '#38bdf8', greeting: '哈伯就像一輛校車那麼大，它在軌道上已經為人類服務超過 30 年了！' },
+          { name: '影像師小晴', role: '星雲色彩專家', color: '#e2e8f0', visor: '#ec4899', greeting: '每一張哈伯深空照片裡，都有成千上萬個遙遠的星系！' }
+        ]
+      },
+      {
+        id: 'sdo',
+        name: '太陽動力學觀測站',
+        enName: 'Solar Dynamics Observatory',
+        position: { x: 25, y: -0.6, z: -2 },
+        radius: 5.4,
+        height: 2.9,
+        themeColor: '#fb7185',
+        groundColor: '#450a0a',
+        rockColor: '#1c1917',
+        buildingType: 'solar_station',
+        badgeIcon: '☀️',
+        badgeName: '太陽風暴守護者',
+        summary: 'NASA「太陽動力學觀測站」（SDO）自 2010 年起全天候監測太陽活動，研究太陽磁場如何產生太陽黑子、太陽閃焰與日冕物質拋射（CME），守護地球太空天氣安全。',
+        background: '劇烈的太陽風暴會影響地球的衛星通訊、GPS 導航與高緯度電網，同時也會在地球南北極高空激發出絢麗的極光。SDO 每 0.75 秒就會拍攝一張高解析度太陽影像，幫助科學家提前預警太陽風暴。',
+        funFact: '太陽光從太陽表面出發，大約只需要 8 分 20 秒就能跨越 1 億 5 千萬公里抵達地球！',
+        photoUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b4/The_Sun_by_the_Atmospheric_Imaging_Assembly_of_NASA%27s_Solar_Dynamics_Observatory_-_20100819.jpg/640px-The_Sun_by_the_Atmospheric_Imaging_Assembly_of_NASA%27s_Solar_Dynamics_Observatory_-_20100819.jpg',
+        photoCredit: 'NASA / SDO (Public Domain, Wikimedia Commons)',
+        sourceName: 'NASA Solar Dynamics Observatory (SDO)',
+        sourceUrl: 'https://sdo.gsfc.nasa.gov/',
+        quiz: {
+          question: '當太陽風暴（帶電粒子流）撞擊地球高層大氣與磁場時，會產生哪種美麗的自然現象？',
+          options: ['彩虹', '極光（Aurora）', '流星雨'],
+          answerIndex: 1,
+          explanation: '太陽帶電粒子與地球高層大氣氣體碰撞發光，形成絢麗的北極光與南極光！'
+        },
+        npcs: [
+          { name: '氣象官陽子', role: '太空天氣預報員', color: '#fda4af', visor: '#facc15', greeting: '我們全天候盯著太陽耀斑，一旦有強烈日冕拋射，就會立刻通知衛星調整姿態！' },
+          { name: '磁場師雷歐', role: '日冕觀測員', color: '#fdba74', visor: '#be123c', greeting: '太陽黑子其實是磁場特別強、溫度比周圍略低一點的區域喔！' }
+        ]
+      }
+    ];
+
+    // 建造工坊物件清單定義
+    const BUILDABLE_CATALOG = [
+      { id: 'pod_house', name: '太空艙房子', icon: '🏠', color: '#38bdf8', radius: 1.1 },
+      { id: 'alien_garden', name: '外星發光花圃', icon: '🌺', color: '#f472b6', radius: 0.95 },
+      { id: 'space_lamp', name: '星際能量路燈', icon: '🏮', color: '#facc15', radius: 0.45 },
+      { id: 'astro_bench', name: '觀景長椅', icon: '🪑', color: '#94a3b8', radius: 0.75 },
+      { id: 'probe_balloon', name: '高空探測氣球', icon: '🎈', color: '#fb923c', radius: 0.6 },
+      { id: 'mission_flag', name: '探索任務旗幟', icon: '🚩', color: '#ef4444', radius: 0.45 },
+      { id: 'comm_radar', name: '深空通訊雷達', icon: '📡', color: '#a855f7', radius: 0.85 },
+      { id: 'energy_crystal', name: '能量水晶礦簇', icon: '💎', color: '#34d399', radius: 0.8 }
+    ];
+
+    // =========================================================================
+    // 第二階段：狀態管理與瀏覽器 LocalStorage 持久化
+    // =========================================================================
+    const STORAGE_KEY_PROGRESS = 'space_islands_progress_v1';
+    const STORAGE_KEY_BUILDS = 'space_islands_builds_v1';
+    const STORAGE_KEY_BRIDGES = 'space_islands_bridges_v1';
+
+    let appState = {
+      completedIslands: JSON.parse(localStorage.getItem(STORAGE_KEY_PROGRESS) || '[]'),
+      selectedIslandId: null,
+      rightTab: 'info',
+      qualityHigh: true,
+      // 自動導覽狀態
+      tourActive: false,
+      tourPaused: false,
+      tourIndex: -1, // -1 代表俯瞰全星系
+      tourTimer: 0,
+      // 建造系統狀態
+      buildSubMode: 'place', // 'place' | 'edit'
+      selectedCatalogId: BUILDABLE_CATALOG[0].id,
+      customProps: [], // { uid, islandId, type, x, z, rotY }
+      selectedPropUid: null,
+      undoStack: [],
+      redoStack: [],
+      // 橋梁系統狀態
+      bridgeToolActive: false,
+      bridgeFirstIslandId: null,
+      bridges: [] // { id, islandA, islandB }
+    };
+
+    function saveProgress() {
+      localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(appState.completedIslands));
+      updateProgressUI();
+    }
+
+    function saveBuilds() {
+      localStorage.setItem(STORAGE_KEY_BUILDS, JSON.stringify(appState.customProps));
+    }
+
+    function saveBridges() {
+      localStorage.setItem(STORAGE_KEY_BRIDGES, JSON.stringify(appState.bridges));
+    }
+
+    // =========================================================================
+    // 第三階段：Three.js 3D 場景初始化與 Low Poly 幾何生成器
+    // =========================================================================
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x090b22, 0.0065);
+
+    const camera = new THREE.PerspectiveCamera(48, window.innerWidth / window.innerHeight, 0.1, 400);
+    const DEFAULT_CAM_POS = new THREE.Vector3(0, 34, 52);
+    const DEFAULT_CAM_TARGET = new THREE.Vector3(0, 0, 0);
+    camera.position.copy(DEFAULT_CAM_POS);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.15;
+    container.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.06;
+    controls.maxDistance = 95;
+    controls.minDistance = 8;
+    controls.maxPolarAngle = Math.PI * 0.48;
+    controls.target.copy(DEFAULT_CAM_TARGET);
+
+    // 相機平滑飛行動畫目標
+    const cameraAnim = {
+      active: false,
+      targetPos: new THREE.Vector3(),
+      targetLook: new THREE.Vector3()
+    };
+
+    function flyCameraTo(pos, lookAt) {
+      cameraAnim.targetPos.copy(pos);
+      cameraAnim.targetLook.copy(lookAt);
+      cameraAnim.active = true;
+    }
+
+    // 燈光系統
+    const hemiLight = new THREE.HemisphereLight(0xa5b4fc, 0x1e1b4b, 1.15);
+    scene.add(hemiLight);
+
+    const dirLight = new THREE.DirectionalLight(0xfffbeb, 1.9);
+    dirLight.position.set(28, 48, 26);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 2048;
+    dirLight.shadow.mapSize.height = 2048;
+    dirLight.shadow.camera.near = 10;
+    dirLight.shadow.camera.far = 130;
+    const d = 42;
+    dirLight.shadow.camera.left = -d;
+    dirLight.shadow.camera.right = d;
+    dirLight.shadow.camera.top = d;
+    dirLight.shadow.camera.bottom = -d;
+    dirLight.shadow.bias = -0.0005;
+    scene.add(dirLight);
+
+    const rimLight = new THREE.PointLight(0xa855f7, 2.2, 120);
+    rimLight.position.set(-25, 18, -25);
+    scene.add(rimLight);
+
+    // 星空粒子背景與漂浮星雲環
+    function createStarfield() {
+      const starGeo = new THREE.BufferGeometry();
+      const count = 1800;
+      const positions = new Float32Array(count * 3);
+      const colors = new Float32Array(count * 3);
+      const palette = [new THREE.Color('#ffffff'), new THREE.Color('#93c5fd'), new THREE.Color('#fde047'), new THREE.Color('#d8b4fe')];
+
+      for (let i = 0; i < count; i++) {
+        const r = 85 + Math.random() * 140;
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
+        positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+        positions[i * 3 + 1] = r * Math.cos(phi);
+        positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+
+        const c = palette[Math.floor(Math.random() * palette.length)];
+        colors[i * 3] = c.r;
+        colors[i * 3 + 1] = c.g;
+        colors[i * 3 + 2] = c.b;
+      }
+      starGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      starGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+      const starMat = new THREE.PointsMaterial({
+        size: 0.75,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.9
+      });
+      const stars = new THREE.Points(starGeo, starMat);
+      scene.add(stars);
+      return stars;
+    }
+    const starField = createStarfield();
+
+    // 漂浮星雲雲朵群
+    const cloudsGroup = new THREE.Group();
+    scene.add(cloudsGroup);
+    const cloudMat = new THREE.MeshStandardMaterial({
+      color: 0xc4b5fd,
+      roughness: 0.9,
+      transparent: true,
+      opacity: 0.25,
+      flatShading: true
+    });
+    for (let i = 0; i < 16; i++) {
+      const cGroup = new THREE.Group();
+      const puffs = 3 + Math.floor(Math.random() * 3);
+      for (let p = 0; p < puffs; p++) {
+        const geo = new THREE.DodecahedronGeometry(1.4 + Math.random() * 1.4, 0);
+        const m = new THREE.Mesh(geo, cloudMat);
+        m.position.set((p - 1) * 1.6, (Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 1.2);
+        cGroup.add(m);
+      }
+      const angle = (i / 16) * Math.PI * 2;
+      const dist = 26 + Math.random() * 24;
+      cGroup.position.set(Math.cos(angle) * dist, 7 + Math.random() * 9, Math.sin(angle) * dist);
+      cGroup.userData = { angle, dist, speed: 0.015 + Math.random() * 0.015, baseY: cGroup.position.y };
+      cloudsGroup.add(cGroup);
+    }
+
+    // 儲存所有島嶼 3D 物件與碰撞半徑
+    const islandEntities = new Map(); // id -> { data, group, topMesh, obstacles: [{x,z,r}], npcs: [], animatedParts: [] }
+    const clickableMeshes = []; // 用於 Raycasting 點擊檢測
+
+    // 建立單座浮空島的專屬代表建築與裝飾
+    function buildIslandLandmark(data, obstacles, animatedParts) {
+      const group = new THREE.Group();
+      const matWhite = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.4, flatShading: true });
+      const matMetal = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.35, metalness: 0.4, flatShading: true });
+      const matDark = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.6, flatShading: true });
+      const matAccent = new THREE.MeshStandardMaterial({ color: data.themeColor, roughness: 0.3, emissive: data.themeColor, emissiveIntensity: 0.25, flatShading: true });
+      const matGold = new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.25, metalness: 0.6, flatShading: true });
+
+      switch (data.buildingType) {
+        case 'iss_station': {
+          // 國際太空站核心艙與旋轉太陽能板
+          const core = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.75, 3.4, 8), matWhite);
+          core.rotation.z = Math.PI / 2;
+          core.position.y = 1.6;
+          core.castShadow = true;
+          group.add(core);
+
+          const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.65, 1.5, 8), matMetal);
+          pillar.position.y = 0.75;
+          pillar.castShadow = true;
+          group.add(pillar);
+
+          const solarGroup = new THREE.Group();
+          solarGroup.position.y = 1.6;
+          const panelMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.2, metalness: 0.5 });
+          [-2.3, 2.3].forEach(xPos => {
+            const wing = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.08, 3.6), panelMat);
+            wing.position.x = xPos;
+            wing.castShadow = true;
+            solarGroup.add(wing);
+          });
+          group.add(solarGroup);
+          animatedParts.push({ mesh: solarGroup, type: 'spinX', speed: 0.4 });
+          obstacles.push({ x: 0, z: 0, r: 1.7 });
+          break;
+        }
+        case 'apollo_lander': {
+          // 阿波羅登月艇鷹號與美國/探索旗幟
+          const base = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.3, 0.9, 8), matGold);
+          base.position.y = 0.95;
+          base.castShadow = true;
+          group.add(base);
+
+          const cabin = new THREE.Mesh(new THREE.DodecahedronGeometry(0.95, 0), matMetal);
+          cabin.position.y = 1.85;
+          cabin.castShadow = true;
+          group.add(cabin);
+
+          for (let i = 0; i < 4; i++) {
+            const ang = (i * Math.PI) / 2 + Math.PI / 4;
+            const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.3, 6), matGold);
+            leg.position.set(Math.cos(ang) * 1.25, 0.55, Math.sin(ang) * 1.25);
+            leg.rotation.z = -Math.cos(ang) * 0.45;
+            leg.rotation.x = Math.sin(ang) * 0.45;
+            group.add(leg);
+          }
+          obstacles.push({ x: 0, z: 0, r: 1.75 });
+          break;
+        }
+        case 'mars_rover': {
+          // 毅力號火星車與懸浮機智號直升機
+          const body = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.75, 1.2), matWhite);
+          body.position.y = 0.85;
+          body.castShadow = true;
+          group.add(body);
+
+          const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 1.1, 6), matWhite);
+          mast.position.set(0.55, 1.5, 0);
+          group.add(mast);
+
+          const camHead = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.35, 0.5), matAccent);
+          camHead.position.set(0.55, 2.05, 0);
+          group.add(camHead);
+
+          // 6 個輪子
+          [-0.7, 0, 0.7].forEach(wx => {
+            [-0.72, 0.72].forEach(wz => {
+              const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.2, 8), matDark);
+              wheel.rotation.x = Math.PI / 2;
+              wheel.position.set(wx, 0.28, wz);
+              group.add(wheel);
+            });
+          });
+
+          // 機智號直升機
+          const heli = new THREE.Group();
+          heli.position.set(-1.6, 2.5, 1.2);
+          const hBody = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.3, 0.35), matGold);
+          const rotor = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.04, 0.12), matDark);
+          rotor.position.y = 0.28;
+          heli.add(hBody, rotor);
+          group.add(heli);
+          animatedParts.push({ mesh: rotor, type: 'spinY', speed: 12 });
+          animatedParts.push({ mesh: heli, type: 'hover', baseY: 2.5, speed: 2.5 });
+          obstacles.push({ x: 0, z: 0, r: 1.6 });
+          break;
+        }
+        case 'jwst_telescope': {
+          // 詹姆斯韋伯鍍金六角主鏡與遮陽罩
+          const shield = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.12, 2.2), new THREE.MeshStandardMaterial({ color: 0xe879f9, roughness: 0.3 }));
+          shield.position.y = 0.75;
+          shield.rotation.x = 0.25;
+          shield.castShadow = true;
+          group.add(shield);
+
+          const mirror = new THREE.Mesh(new THREE.CylinderGeometry(1.35, 1.35, 0.22, 6), matGold);
+          mirror.position.set(0, 1.95, -0.2);
+          mirror.rotation.x = Math.PI / 2 - 0.3;
+          mirror.castShadow = true;
+          group.add(mirror);
+          animatedParts.push({ mesh: mirror, type: 'pulseScale', speed: 1.5 });
+          obstacles.push({ x: 0, z: 0, r: 1.8 });
+          break;
+        }
+        case 'voyager_probe': {
+          // 航海家高增益拋物面天線與金唱片
+          const dish = new THREE.Mesh(new THREE.ConeGeometry(1.5, 0.8, 12, 1, true), matWhite);
+          dish.position.y = 1.9;
+          dish.rotation.x = Math.PI + 0.35;
+          dish.castShadow = true;
+          group.add(dish);
+
+          const bus = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.65, 0.8, 10), matDark);
+          bus.position.y = 1.0;
+          group.add(bus);
+
+          const goldRecord = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 0.08, 16), matGold);
+          goldRecord.position.set(0, 1.0, 0.68);
+          goldRecord.rotation.x = Math.PI / 2;
+          group.add(goldRecord);
+          animatedParts.push({ mesh: goldRecord, type: 'spinZ', speed: 1.8 });
+          obstacles.push({ x: 0, z: 0, r: 1.6 });
+          break;
+        }
+        case 'saturn_observatory': {
+          // 卡西尼土星環球體觀測台
+          const dome = new THREE.Mesh(new THREE.SphereGeometry(1.15, 12, 10), matGold);
+          dome.position.y = 1.65;
+          dome.castShadow = true;
+          group.add(dome);
+
+          const ring = new THREE.Mesh(new THREE.TorusGeometry(2.05, 0.18, 6, 24), matAccent);
+          ring.position.y = 1.65;
+          ring.rotation.x = Math.PI / 2.3;
+          ring.rotation.y = 0.25;
+          group.add(ring);
+
+          const base = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.9, 0.8, 8), matMetal);
+          base.position.y = 0.4;
+          group.add(base);
+          animatedParts.push({ mesh: ring, type: 'spinZ', speed: 0.7 });
+          obstacles.push({ x: 0, z: 0, r: 1.7 });
+          break;
+        }
+        case 'asteroid_mine': {
+          // 隼鳥二號龍宮採礦鑽探機與發光水晶
+          const rig = new THREE.Mesh(new THREE.ConeGeometry(1.2, 2.6, 6), matMetal);
+          rig.position.y = 1.3;
+          rig.castShadow = true;
+          group.add(rig);
+
+          const drill = new THREE.Mesh(new THREE.ConeGeometry(0.35, 1.2, 8), matAccent);
+          drill.position.y = 0.6;
+          drill.rotation.x = Math.PI;
+          group.add(drill);
+          animatedParts.push({ mesh: drill, type: 'spinY', speed: 5 });
+
+          // 周圍發光礦石
+          const crystalMat = new THREE.MeshStandardMaterial({ color: 0x34d399, emissive: 0x10b981, emissiveIntensity: 0.7, flatShading: true });
+          [[-1.6, 0.9], [1.7, -0.7], [-0.9, -1.5]].forEach(([cx, cz]) => {
+            const c = new THREE.Mesh(new THREE.OctahedronGeometry(0.55, 0), crystalMat);
+            c.position.set(cx, 0.5, cz);
+            group.add(c);
+            obstacles.push({ x: cx, z: cz, r: 0.7 });
+          });
+          obstacles.push({ x: 0, z: 0, r: 1.5 });
+          break;
+        }
+        case 'artemis_dome': {
+          // 阿提米絲透明生態居住穹頂與水冰採集塔
+          const glassMat = new THREE.MeshStandardMaterial({
+            color: 0x93c5fd,
+            transparent: true,
+            opacity: 0.55,
+            roughness: 0.1,
+            flatShading: true
+          });
+          const dome = new THREE.Mesh(new THREE.SphereGeometry(1.55, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), glassMat);
+          dome.position.y = 0.2;
+          group.add(dome);
+
+          const ringBase = new THREE.Mesh(new THREE.TorusGeometry(1.55, 0.16, 6, 16), matWhite);
+          ringBase.rotation.x = Math.PI / 2;
+          ringBase.position.y = 0.2;
+          group.add(ringBase);
+
+          const innerCore = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.55, 1.2, 8), matAccent);
+          innerCore.position.y = 0.6;
+          group.add(innerCore);
+          obstacles.push({ x: 0, z: 0, r: 1.85 });
+          break;
+        }
+        case 'hubble_dock': {
+          // 哈伯圓筒型太空望遠鏡與太陽能翼
+          const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.75, 2.7, 10), matMetal);
+          tube.position.y = 1.65;
+          tube.rotation.z = 0.55;
+          tube.castShadow = true;
+          group.add(tube);
+
+          const stand = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.3, 0.6), matDark);
+          stand.position.y = 0.65;
+          group.add(stand);
+
+          const wing = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.8, 3.2), matAccent);
+          wing.position.y = 1.75;
+          group.add(wing);
+          animatedParts.push({ mesh: wing, type: 'spinY', speed: 0.5 });
+          obstacles.push({ x: 0, z: 0, r: 1.6 });
+          break;
+        }
+        case 'solar_station': {
+          // 太陽動力學觀測站與發光日冕球體
+          const sunMat = new THREE.MeshStandardMaterial({
+            color: 0xfb7185,
+            emissive: 0xf43f5e,
+            emissiveIntensity: 0.85,
+            flatShading: true
+          });
+          const sunSphere = new THREE.Mesh(new THREE.IcosahedronGeometry(1.1, 1), sunMat);
+          sunSphere.position.y = 2.0;
+          group.add(sunSphere);
+
+          const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.85, 1.2, 8), matDark);
+          tower.position.y = 0.6;
+          group.add(tower);
+          animatedParts.push({ mesh: sunSphere, type: 'spinY', speed: 0.9 });
+          obstacles.push({ x: 0, z: 0, r: 1.6 });
+          break;
+        }
+      }
+
+      // 每座島隨機點綴 3~4 顆 Low Poly 隕石或外星植物
+      const rockMat = new THREE.MeshStandardMaterial({ color: data.rockColor, roughness: 0.85, flatShading: true });
+      for (let i = 0; i < 4; i++) {
+        const ang = (i / 4) * Math.PI * 2 + 0.4;
+        const dist = data.radius * 0.66;
+        const rx = Math.cos(ang) * dist;
+        const rz = Math.sin(ang) * dist;
+        const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.42 + (i % 2) * 0.2, 0), rockMat);
+        rock.position.set(rx, 0.25, rz);
+        rock.castShadow = true;
+        group.add(rock);
+        obstacles.push({ x: rx, z: rz, r: 0.65 });
+      }
+
+      return group;
+    }
+
+    // 建立卡通太空人 NPC 模型
+    function createAstronautMesh(npcData) {
+      const group = new THREE.Group();
+      const suitMat = new THREE.MeshStandardMaterial({ color: npcData.color, roughness: 0.4, flatShading: true });
+      const visorMat = new THREE.MeshStandardMaterial({ color: npcData.visor, roughness: 0.15, metalness: 0.7, emissive: npcData.visor, emissiveIntensity: 0.2 });
+      const packMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.5, flatShading: true });
+
+      // 身體
+      const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.28, 0.32, 4, 8), suitMat);
+      body.position.y = 0.55;
+      body.castShadow = true;
+      group.add(body);
+
+      // 維生背包
+      const backpack = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.42, 0.22), packMat);
+      backpack.position.set(0, 0.6, -0.26);
+      backpack.castShadow = true;
+      group.add(backpack);
+
+      // 圓潤頭盔
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.32, 10, 10), suitMat);
+      head.position.y = 1.05;
+      head.castShadow = true;
+      group.add(head);
+
+      // 面罩
+      const visor = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), visorMat);
+      visor.position.set(0, 1.05, 0.16);
+      visor.scale.set(1.1, 0.85, 0.7);
+      group.add(visor);
+
+      // 左右手臂 (用於揮手動畫)
+      const leftArm = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.25, 4, 6), suitMat);
+      leftArm.position.set(-0.36, 0.62, 0);
+      group.add(leftArm);
+
+      const rightArm = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.25, 4, 6), suitMat);
+      rightArm.position.set(0.36, 0.62, 0);
+      group.add(rightArm);
+
+      group.userData.leftArm = leftArm;
+      group.userData.rightArm = rightArm;
+      return group;
+    }
+
+    // 建立所有 10 座浮空島
+    function initIslands() {
+      SPACE_ISLANDS_DATA.forEach((data, idx) => {
+        const islandGroup = new THREE.Group();
+        islandGroup.position.set(data.position.x, data.position.y, data.position.z);
+        scene.add(islandGroup);
+
+        // 浮空島倒錐形岩石底座
+        const bottomGeo = new THREE.ConeGeometry(data.radius * 0.96, data.height, 9);
+        bottomGeo.rotateX(Math.PI);
+        const bottomMat = new THREE.MeshStandardMaterial({
+          color: data.rockColor,
+          roughness: 0.88,
+          flatShading: true
+        });
+        const bottomMesh = new THREE.Mesh(bottomGeo, bottomMat);
+        bottomMesh.position.y = -data.height / 2;
+        bottomMesh.castShadow = true;
+        bottomMesh.receiveShadow = true;
+        islandGroup.add(bottomMesh);
+
+        // 浮空島平坦表層圓盤 (供人物行走與 Raycasting 建造)
+        const topGeo = new THREE.CylinderGeometry(data.radius, data.radius * 0.96, 0.45, 12);
+        const topMat = new THREE.MeshStandardMaterial({
+          color: data.groundColor,
+          roughness: 0.75,
+          flatShading: true
+        });
+        const topMesh = new THREE.Mesh(topGeo, topMat);
+        topMesh.position.y = -0.15;
+        topMesh.receiveShadow = true;
+        topMesh.userData = { type: 'island_ground', islandId: data.id };
+        islandGroup.add(topMesh);
+        clickableMeshes.push(topMesh);
+
+        // 島嶼外環發光能量邊框
+        const rimGeo = new THREE.TorusGeometry(data.radius + 0.06, 0.08, 6, 24);
+        rimGeo.rotateX(Math.PI / 2);
+        const rimMat = new THREE.MeshBasicMaterial({ color: data.themeColor, transparent: true, opacity: 0.65 });
+        const rimMesh = new THREE.Mesh(rimGeo, rimMat);
+        rimMesh.position.y = 0.05;
+        islandGroup.add(rimMesh);
+
+        const obstacles = [];
+        const animatedParts = [];
+
+        // 放置代表建築
+        const landmark = buildIslandLandmark(data, obstacles, animatedParts);
+        landmark.traverse(child => {
+          if (child.isMesh) {
+            child.userData = { type: 'island_landmark', islandId: data.id };
+            clickableMeshes.push(child);
+          }
+        });
+        islandGroup.add(landmark);
+
+        // 放置太空人 NPC
+        const npcControllers = [];
+        data.npcs.forEach((npcInfo, nIdx) => {
+          const npcMesh = createAstronautMesh(npcInfo);
+          const startAngle = nIdx * Math.PI + 0.7;
+          const startDist = data.radius * 0.55;
+          npcMesh.position.set(Math.cos(startAngle) * startDist, 0.07, Math.sin(startAngle) * startDist);
+          npcMesh.traverse(c => {
+            if (c.isMesh) {
+              c.userData = { type: 'npc', islandId: data.id, npcIndex: nIdx };
+              clickableMeshes.push(c);
+            }
+          });
+          islandGroup.add(npcMesh);
+
+          npcControllers.push({
+            info: npcInfo,
+            mesh: npcMesh,
+            homeIslandId: data.id,
+            currentIslandId: data.id,
+            targetIslandId: null, // 若要跨橋移動則設定目標島嶼 ID
+            bridgeState: null, // null | 'to_entry' | 'crossing' | 'to_center'
+            activeBridge: null,
+            targetPos: new THREE.Vector3(npcMesh.position.x, 0.07, npcMesh.position.z),
+            state: 'walk', // 'walk' | 'idle' | 'wave'
+            stateTimer: 1 + Math.random() * 3,
+            speed: 1.25 + Math.random() * 0.35
+          });
+        });
+
+        islandEntities.set(data.id, {
+          data,
+          index: idx,
+          group: islandGroup,
+          topMesh,
+          obstacles,
+          npcs: npcControllers,
+          animatedParts,
+          floatOffset: idx * 0.85
+        });
+      });
+    }
+
+    initIslands();
+
+    // =========================================================================
+    // 第四階段：創意建造工坊 (Raycasting 預覽、碰撞檢測、Undo/Redo、儲存)
+    // =========================================================================
+    const customPropsGroup = new THREE.Group();
+    scene.add(customPropsGroup);
+    const propMeshMap = new Map(); // uid -> THREE.Group
+
+    // 建立可建造物件的 3D 網格
+    function createBuildableMesh(typeId, isPreview = false) {
+      const group = new THREE.Group();
+      const applyMat = (color, emissive = 0x000000) => {
+        if (isPreview) {
+          return new THREE.MeshBasicMaterial({ color: 0x22c55e, transparent: true, opacity: 0.55, wireframe: false });
+        }
+        return new THREE.MeshStandardMaterial({
+          color,
+          emissive,
+          emissiveIntensity: emissive ? 0.35 : 0,
+          roughness: 0.45,
+          flatShading: true
+        });
+      };
+
+      switch (typeId) {
+        case 'pod_house': {
+          const base = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.95, 0.9, 8), applyMat(0xf8fafc));
+          base.position.y = 0.45;
+          const roof = new THREE.Mesh(new THREE.ConeGeometry(1.05, 0.75, 8), applyMat(0x38bdf8));
+          roof.position.y = 1.25;
+          const door = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.55, 0.2), applyMat(0x1e293b));
+          door.position.set(0, 0.28, 0.85);
+          group.add(base, roof, door);
+          break;
+        }
+        case 'alien_garden': {
+          const soil = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.9, 0.22, 8), applyMat(0x4c1d95));
+          soil.position.y = 0.11;
+          group.add(soil);
+          const flowerColors = [0xf472b6, 0x34d399, 0xfacc15];
+          for (let i = 0; i < 4; i++) {
+            const ang = (i / 4) * Math.PI * 2;
+            const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.45, 5), applyMat(0x10b981));
+            stem.position.set(Math.cos(ang) * 0.4, 0.35, Math.sin(ang) * 0.4);
+            const bud = new THREE.Mesh(new THREE.DodecahedronGeometry(0.22, 0), applyMat(flowerColors[i % 3], flowerColors[i % 3]));
+            bud.position.set(Math.cos(ang) * 0.4, 0.62, Math.sin(ang) * 0.4);
+            group.add(stem, bud);
+          }
+          break;
+        }
+        case 'space_lamp': {
+          const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.1, 1.6, 6), applyMat(0x94a3b8));
+          pole.position.y = 0.8;
+          const orb = new THREE.Mesh(new THREE.SphereGeometry(0.25, 8, 8), applyMat(0xfef08a, 0xfacc15));
+          orb.position.y = 1.7;
+          group.add(pole, orb);
+          break;
+        }
+        case 'astro_bench': {
+          const seat = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.12, 0.45), applyMat(0x60a5fa));
+          seat.position.y = 0.35;
+          const back = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.4, 0.1), applyMat(0x3b82f6));
+          back.position.set(0, 0.58, -0.18);
+          group.add(seat, back);
+          break;
+        }
+        case 'probe_balloon': {
+          const string = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 1.4, 4), applyMat(0xe2e8f0));
+          string.position.y = 0.7;
+          const balloon = new THREE.Mesh(new THREE.SphereGeometry(0.55, 10, 10), applyMat(0xfb923c, 0xf97316));
+          balloon.position.y = 1.75;
+          group.add(string, balloon);
+          break;
+        }
+        case 'mission_flag': {
+          const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.8, 6), applyMat(0xf8fafc));
+          pole.position.y = 0.9;
+          const flag = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.45, 0.06), applyMat(0xef4444, 0xdc2626));
+          flag.position.set(0.38, 1.5, 0);
+          group.add(pole, flag);
+          break;
+        }
+        case 'comm_radar': {
+          const base = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.5, 0.8, 8), applyMat(0x475569));
+          base.position.y = 0.4;
+          const dish = new THREE.Mesh(new THREE.ConeGeometry(0.75, 0.45, 10, 1, true), applyMat(0xc084fc, 0xa855f7));
+          dish.position.y = 1.1;
+          dish.rotation.x = Math.PI + 0.5;
+          group.add(base, dish);
+          break;
+        }
+        case 'energy_crystal': {
+          const c1 = new THREE.Mesh(new THREE.OctahedronGeometry(0.55, 0), applyMat(0x34d399, 0x10b981));
+          c1.position.y = 0.55;
+          const c2 = new THREE.Mesh(new THREE.OctahedronGeometry(0.35, 0), applyMat(0x6ee7b7, 0x34d399));
+          c2.position.set(0.38, 0.35, 0.25);
+          group.add(c1, c2);
+          break;
+        }
+      }
+
+      if (!isPreview) {
+        group.traverse(m => {
+          if (m.isMesh) {
+            m.castShadow = true;
+            m.receiveShadow = true;
+          }
+        });
+      }
+      return group;
+    }
+
+    // 半透明放置預覽模型
+    let previewGhost = createBuildableMesh(appState.selectedCatalogId, true);
+    previewGhost.visible = false;
+    scene.add(previewGhost);
+
+    function updatePreviewGhostModel() {
+      scene.remove(previewGhost);
+      previewGhost = createBuildableMesh(appState.selectedCatalogId, true);
+      previewGhost.visible = false;
+      scene.add(previewGhost);
+    }
+
+    function setPreviewGhostValid(isValid) {
+      const hex = isValid ? 0x22c55e : 0xef4444;
+      previewGhost.traverse(m => {
+        if (m.isMesh && m.material) {
+          m.material.color.setHex(hex);
+        }
+      });
+    }
+
+    // 檢查在某座島的局部座標 (lx, lz) 是否可合法放置物件
+    function checkPlacementValid(islandId, lx, lz, propRadius, ignoreUid = null) {
+      const ent = islandEntities.get(islandId);
+      if (!ent) return false;
+      const distFromCenter = Math.hypot(lx, lz);
+      if (distFromCenter + propRadius > ent.data.radius - 0.35) {
+        return false; // 超出島嶼邊界
+      }
+      // 檢查與島上預設障礙物碰撞
+      for (const obs of ent.obstacles) {
+        if (Math.hypot(lx - obs.x, lz - obs.z) < propRadius + obs.r) {
+          return false;
+        }
+      }
+      // 檢查與其他已放置自建物件碰撞
+      for (const p of appState.customProps) {
+        if (p.islandId === islandId && p.uid !== ignoreUid) {
+          const cat = BUILDABLE_CATALOG.find(c => c.id === p.type);
+          const rOther = cat ? cat.radius : 0.7;
+          if (Math.hypot(lx - p.x, lz - p.z) < propRadius + rOther) {
+            return false;
+          }
+        }
+      }
+      return true;
+    }
+
+    // 根據 appState.customProps 重新同步 3D 場景中的自建物件
+    function rebuildAllCustomProps() {
+      propMeshMap.forEach(mesh => customPropsGroup.remove(mesh));
+      propMeshMap.clear();
+
+      appState.customProps.forEach(item => {
+        const ent = islandEntities.get(item.islandId);
+        if (!ent) return;
+        const mesh = createBuildableMesh(item.type, false);
+        mesh.position.set(
+          ent.group.position.x + item.x,
+          ent.group.position.y + 0.07,
+          ent.group.position.z + item.z
+        );
+        mesh.rotation.y = item.rotY || 0;
+        mesh.userData = { uid: item.uid, islandId: item.islandId, localX: item.x, localZ: item.z };
+        mesh.traverse(c => {
+          if (c.isMesh) {
+            c.userData = { type: 'custom_prop', uid: item.uid };
+          }
+        });
+        customPropsGroup.add(mesh);
+        propMeshMap.set(item.uid, mesh);
+      });
+      updateHistoryButtons();
+    }
+
+    function pushUndoSnapshot() {
+      appState.undoStack.push(JSON.stringify(appState.customProps));
+      if (appState.undoStack.length > 30) appState.undoStack.shift();
+      appState.redoStack = [];
+    }
+
+    window.undoBuild = () => {
+      if (appState.undoStack.length === 0) return;
+      appState.redoStack.push(JSON.stringify(appState.customProps));
+      appState.customProps = JSON.parse(appState.undoStack.pop());
+      appState.selectedPropUid = null;
+      updateSelectedPropUI();
+      saveBuilds();
+      rebuildAllCustomProps();
+      showToast('已撤銷上一步建造操作', 'info');
+    };
+
+    window.redoBuild = () => {
+      if (appState.redoStack.length === 0) return;
+      appState.undoStack.push(JSON.stringify(appState.customProps));
+      appState.customProps = JSON.parse(appState.redoStack.pop());
+      appState.selectedPropUid = null;
+      updateSelectedPropUI();
+      saveBuilds();
+      rebuildAllCustomProps();
+      showToast('已恢復下一步建造操作', 'info');
+    };
+
+    window.clearAllCustomProps = () => {
+      if (appState.customProps.length === 0) {
+        showToast('目前沒有自建物件可清空', 'warning');
+        return;
+      }
+      pushUndoSnapshot();
+      appState.customProps = [];
+      appState.selectedPropUid = null;
+      updateSelectedPropUI();
+      saveBuilds();
+      rebuildAllCustomProps();
+      showToast('已清空所有自建物件（可按撤銷還原）', 'info');
+    };
+
+    window.resetDefaultScene = () => {
+      pushUndoSnapshot();
+      appState.customProps = [];
+      appState.selectedPropUid = null;
+      appState.bridges = [];
+      saveBuilds();
+      saveBridges();
+      rebuildAllCustomProps();
+      rebuildAllBridges();
+      updateSelectedPropUI();
+      showToast('已還原至預設初始星際群島場景', 'success');
+    };
+
+    window.rotateSelectedProp = () => {
+      if (!appState.selectedPropUid) return;
+      const item = appState.customProps.find(p => p.uid === appState.selectedPropUid);
+      if (!item) return;
+      pushUndoSnapshot();
+      item.rotY = (item.rotY || 0) + Math.PI / 4;
+      saveBuilds();
+      rebuildAllCustomProps();
+      showToast('已將物件旋轉 45 度', 'info');
+    };
+
+    window.deleteSelectedProp = () => {
+      if (!appState.selectedPropUid) return;
+      pushUndoSnapshot();
+      appState.customProps = appState.customProps.filter(p => p.uid !== appState.selectedPropUid);
+      appState.selectedPropUid = null;
+      updateSelectedPropUI();
+      saveBuilds();
+      rebuildAllCustomProps();
+      showToast('已刪除選取的物件', 'info');
+    };
+
+    function updateHistoryButtons() {
+      const undoBtn = document.getElementById('undo-btn');
+      const redoBtn = document.getElementById('redo-btn');
+      if (undoBtn) undoBtn.disabled = appState.undoStack.length === 0;
+      if (redoBtn) redoBtn.disabled = appState.redoStack.length === 0;
+    }
+
+    function updateSelectedPropUI() {
+      const box = document.getElementById('selected-prop-controls');
+      const nameLabel = document.getElementById('selected-prop-name');
+      if (!appState.selectedPropUid) {
+        box.classList.add('hidden');
+        return;
+      }
+      const item = appState.customProps.find(p => p.uid === appState.selectedPropUid);
+      if (!item) {
+        box.classList.add('hidden');
+        return;
+      }
+      const cat = BUILDABLE_CATALOG.find(c => c.id === item.type);
+      nameLabel.textContent = `已選取：${cat ? cat.icon + ' ' + cat.name : '自建物件'}`;
+      box.classList.remove('hidden');
+    }
+
+    // =========================================================================
+    // 第五階段：星際橋梁連接系統 (3D 橋面、護欄、支柱與跨島 NPC 路線更新)
+    // =========================================================================
+    const bridgesGroup = new THREE.Group();
+    scene.add(bridgesGroup);
+    const MAX_BRIDGE_DISTANCE = 42; // 允許連接的最大中心距
+
+    function createBridgeMesh(entA, entB) {
+      const posA = new THREE.Vector3(entA.data.position.x, entA.data.position.y + 0.1, entA.data.position.z);
+      const posB = new THREE.Vector3(entB.data.position.x, entB.data.position.y + 0.1, entB.data.position.z);
+      const dir = new THREE.Vector3().subVectors(posB, posA);
+      const fullDist = dir.length();
+      dir.normalize();
+
+      // 計算兩座島邊緣的入口點
+      const startPt = posA.clone().addScaledVector(dir, entA.data.radius - 0.3);
+      const endPt = posB.clone().addScaledVector(dir, -(entB.data.radius - 0.3));
+      const span = startPt.distanceTo(endPt);
+
+      const bridgeObj = new THREE.Group();
+      const midPt = new THREE.Vector3().addVectors(startPt, endPt).multiplyScalar(0.5);
+      bridgeObj.position.copy(midPt);
+      bridgeObj.lookAt(endPt);
+
+      // 發光能量橋面
+      const deckGeo = new THREE.BoxGeometry(1.5, 0.16, span);
+      const deckMat = new THREE.MeshStandardMaterial({
+        color: 0x38bdf8,
+        emissive: 0x0284c7,
+        emissiveIntensity: 0.45,
+        roughness: 0.3,
+        flatShading: true
+      });
+      const deck = new THREE.Mesh(deckGeo, deckMat);
+      deck.receiveShadow = true;
+      bridgeObj.add(deck);
+
+      // 左右護欄與能量支柱
+      const railMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0xeab308, emissiveIntensity: 0.3 });
+      [-0.72, 0.72].forEach(rx => {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, span), railMat);
+        rail.position.set(rx, 0.45, 0);
+        bridgeObj.add(rail);
+
+        const postCount = Math.max(2, Math.floor(span / 3));
+        for (let i = 0; i <= postCount; i++) {
+          const pz = -span / 2 + (i / postCount) * span;
+          const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.55, 6), railMat);
+          post.position.set(rx, 0.25, pz);
+          bridgeObj.add(post);
+        }
+      });
+
+      // 兩端登橋入口光門
+      [-span / 2 + 0.15, span / 2 - 0.15].forEach(ez => {
+        const arch = new THREE.Mesh(new THREE.TorusGeometry(0.85, 0.08, 6, 12, Math.PI), railMat);
+        arch.position.set(0, 0.1, ez);
+        bridgeObj.add(arch);
+      });
+
+      return { mesh: bridgeObj, startPt, endPt };
+    }
+
+    function rebuildAllBridges() {
+      while (bridgesGroup.children.length > 0) {
+        bridgesGroup.remove(bridgesGroup.children[0]);
+      }
+
+      appState.bridges.forEach(br => {
+        const entA = islandEntities.get(br.islandA);
+        const entB = islandEntities.get(br.islandB);
+        if (!entA || !entB) return;
+        const { mesh, startPt, endPt } = createBridgeMesh(entA, entB);
+        br.startPt = startPt;
+        br.endPt = endPt;
+        bridgesGroup.add(mesh);
+      });
+
+      // 若橋梁被刪除，將正在跨橋的 NPC 安全送回原本所屬島嶼
+      islandEntities.forEach(ent => {
+        ent.npcs.forEach(npc => {
+          if (npc.bridgeState && !appState.bridges.some(b => b.id === npc.activeBridge?.id)) {
+            npc.bridgeState = null;
+            npc.activeBridge = null;
+            npc.currentIslandId = npc.homeIslandId;
+            const homeEnt = islandEntities.get(npc.homeIslandId);
+            homeEnt.group.add(npc.mesh);
+            npc.mesh.position.set(0, 0.07, homeEnt.data.radius * 0.5);
+          }
+        });
+      });
+
+      renderBridgeListUI();
+    }
+
+    window.toggleBridgeCreationMode = () => {
+      appState.bridgeToolActive = !appState.bridgeToolActive;
+      appState.bridgeFirstIslandId = null;
+      previewGhost.visible = false;
+      updateBridgeToolUI();
+    };
+
+    function updateBridgeToolUI() {
+      const btn = document.getElementById('toggle-bridge-tool-btn');
+      const indicator = document.getElementById('bridge-step-indicator');
+      const stepText = document.getElementById('bridge-step-text');
+
+      if (appState.bridgeToolActive) {
+        btn.classList.remove('from-cyan-500', 'to-blue-600');
+        btn.classList.add('from-amber-500', 'to-orange-600');
+        btn.querySelector('span').textContent = '取消橋梁連接模式';
+        indicator.classList.remove('hidden');
+        if (!appState.bridgeFirstIslandId) {
+          stepText.textContent = '步驟 1/2：請在 3D 畫面點擊「起點島嶼」';
+        } else {
+          const first = islandEntities.get(appState.bridgeFirstIslandId)?.data.name;
+          stepText.textContent = `步驟 2/2：起點【${first}】，請點擊「終點島嶼」`;
+        }
+      } else {
+        btn.classList.add('from-cyan-500', 'to-blue-600');
+        btn.classList.remove('from-amber-500', 'to-orange-600');
+        btn.querySelector('span').textContent = '啟動橋梁連接器';
+        indicator.classList.add('hidden');
+      }
+    }
+
+    function handleBridgeIslandClick(islandId) {
+      if (!appState.bridgeFirstIslandId) {
+        appState.bridgeFirstIslandId = islandId;
+        updateBridgeToolUI();
+        const name = islandEntities.get(islandId).data.name;
+        showToast(`已選定起點：${name}，請點擊另一座鄰近島嶼！`, 'info');
+        return;
+      }
+
+      if (appState.bridgeFirstIslandId === islandId) {
+        showToast('請選擇另一座不同的島嶼進行連接！', 'warning');
+        return;
+      }
+
+      const idA = appState.bridgeFirstIslandId;
+      const idB = islandId;
+      const exists = appState.bridges.some(b => (b.islandA === idA && b.islandB === idB) || (b.islandA === idB && b.islandB === idA));
+      if (exists) {
+        showToast('這兩座島嶼之間已經建有星際橋梁了！', 'warning');
+        appState.bridgeFirstIslandId = null;
+        updateBridgeToolUI();
+        return;
+      }
+
+      const entA = islandEntities.get(idA);
+      const entB = islandEntities.get(idB);
+      const dist = Math.hypot(
+        entA.data.position.x - entB.data.position.x,
+        entA.data.position.z - entB.data.position.z
+      );
+
+      if (dist > MAX_BRIDGE_DISTANCE) {
+        showToast(`兩座島距離過遠（${dist.toFixed(1)} 光年，上限 ${MAX_BRIDGE_DISTANCE}），無法直接架設橋梁！`, 'error');
+        appState.bridgeFirstIslandId = null;
+        updateBridgeToolUI();
+        return;
+      }
+
+      const newBridge = { id: 'br_' + Date.now(), islandA: idA, islandB: idB };
+      appState.bridges.push(newBridge);
+      saveBridges();
+      rebuildAllBridges();
+
+      appState.bridgeFirstIslandId = null;
+      appState.bridgeToolActive = false;
+      updateBridgeToolUI();
+      showToast(`成功建立【${entA.data.name} ⇄ ${entB.data.name}】星際橋梁！太空人現在可以跨島拜訪了！`, 'success');
+    }
+
+    window.deleteBridgeById = (bridgeId) => {
+      appState.bridges = appState.bridges.filter(b => b.id !== bridgeId);
+      saveBridges();
+      rebuildAllBridges();
+      showToast('已拆除該座星際橋梁並更新 NPC 路線', 'info');
+    };
+
+    function renderBridgeListUI() {
+      const list = document.getElementById('bridge-list');
+      const countEl = document.getElementById('bridge-count');
+      countEl.textContent = appState.bridges.length;
+
+      if (appState.bridges.length === 0) {
+        list.innerHTML = `<p class="text-xs text-slate-400 text-center py-3">尚未建立任何星際橋梁</p>`;
+        return;
+      }
+
+      list.innerHTML = appState.bridges.map(br => {
+        const nameA = islandEntities.get(br.islandA)?.data.name || br.islandA;
+        const nameB = islandEntities.get(br.islandB)?.data.name || br.islandB;
+        return `
+          <div class="flex items-center justify-between bg-slate-900/80 border border-cyan-500/30 rounded-xl p-2.5 text-xs">
+            <div class="font-bold text-cyan-200 truncate pr-2">
+              <i class="fa-solid fa-bridge text-amber-400 mr-1"></i> ${nameA} ⇄ ${nameB}
+            </div>
+            <button onclick="deleteBridgeById('${br.id}')" title="拆除橋梁"
+              class="game-btn px-2.5 py-1 rounded-lg bg-rose-600/90 hover:bg-rose-600 text-white font-bold shrink-0">
+              <i class="fa-solid fa-trash"></i>
+            </button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // =========================================================================
+    // 第六階段：Raycasting 互動與點擊/觸控事件處理
+    // =========================================================================
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    let pointerDownPos = { x: 0, y: 0 };
+
+    function updatePointerCoords(clientX, clientY) {
+      pointer.x = (clientX / window.innerWidth) * 2 - 1;
+      pointer.y = -(clientY / window.innerHeight) * 2 + 1;
+    }
+
+    // 滑鼠移動時更新建造預覽
+    window.addEventListener('pointermove', (e) => {
+      if (appState.rightTab !== 'build' || appState.buildSubMode !== 'place') {
+        previewGhost.visible = false;
+        return;
+      }
+      updatePointerCoords(e.clientX, e.clientY);
+      raycaster.setFromCamera(pointer, camera);
+      const groundMeshes = Array.from(islandEntities.values()).map(ent => ent.topMesh);
+      const hits = raycaster.intersectObjects(groundMeshes, false);
+
+      if (hits.length > 0) {
+        const hit = hits[0];
+        const islandId = hit.object.userData.islandId;
+        const ent = islandEntities.get(islandId);
+        const lx = hit.point.x - ent.group.position.x;
+        const lz = hit.point.z - ent.group.position.z;
+        const cat = BUILDABLE_CATALOG.find(c => c.id === appState.selectedCatalogId);
+        const isValid = checkPlacementValid(islandId, lx, lz, cat ? cat.radius : 0.7);
+
+        previewGhost.position.set(hit.point.x, ent.group.position.y + 0.08, hit.point.z);
+        previewGhost.visible = true;
+        setPreviewGhostValid(isValid);
+      } else {
+        previewGhost.visible = false;
+      }
+    });
+
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+      pointerDownPos = { x: e.clientX, y: e.clientY };
+    });
+
+    renderer.domElement.addEventListener('pointerup', (e) => {
+      const moveDist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
+      if (moveDist > 6) return; // 拖曳旋轉鏡頭時不觸發點擊
+
+      updatePointerCoords(e.clientX, e.clientY);
+      raycaster.setFromCamera(pointer, camera);
+
+      // 1. 橋梁連接工具模式優先處理
+      if (appState.bridgeToolActive) {
+        const hits = raycaster.intersectObjects(clickableMeshes, false);
+        if (hits.length > 0 && hits[0].object.userData.islandId) {
+          handleBridgeIslandClick(hits[0].object.userData.islandId);
+        }
+        return;
+      }
+
+      // 2. 建造工坊模式處理
+      if (appState.rightTab === 'build') {
+        if (appState.buildSubMode === 'place') {
+          const groundMeshes = Array.from(islandEntities.values()).map(ent => ent.topMesh);
+          const hits = raycaster.intersectObjects(groundMeshes, false);
+          if (hits.length > 0) {
+            const hit = hits[0];
+            const islandId = hit.object.userData.islandId;
+            const ent = islandEntities.get(islandId);
+            const lx = hit.point.x - ent.group.position.x;
+            const lz = hit.point.z - ent.group.position.z;
+            const cat = BUILDABLE_CATALOG.find(c => c.id === appState.selectedCatalogId);
+
+            if (!checkPlacementValid(islandId, lx, lz, cat ? cat.radius : 0.7)) {
+              showToast('此位置無法建造（超出島嶼邊界或太靠近其他建築）！', 'error');
+              return;
+            }
+            pushUndoSnapshot();
+            appState.customProps.push({
+              uid: 'prop_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+              islandId,
+              type: appState.selectedCatalogId,
+              x: lx,
+              z: lz,
+              rotY: 0
+            });
+            saveBuilds();
+            rebuildAllCustomProps();
+            showToast(`已成功在【${ent.data.name}】建造 ${cat.name}！`, 'success');
+          }
+          return;
+        } else if (appState.buildSubMode === 'edit') {
+          // 檢查是否點中已放置的自建物件
+          const propMeshes = [];
+          propMeshMap.forEach(g => g.traverse(c => { if (c.isMesh) propMeshes.push(c); }));
+          const propHits = raycaster.intersectObjects(propMeshes, false);
+          if (propHits.length > 0) {
+            appState.selectedPropUid = propHits[0].object.userData.uid;
+            updateSelectedPropUI();
+            showToast('已選取物件！可點擊右側旋轉/刪除，或點擊島嶼新位置移動', 'info');
+            return;
+          }
+
+          // 若已選取物件，點擊島嶼地面則將其移動過去
+          if (appState.selectedPropUid) {
+            const groundMeshes = Array.from(islandEntities.values()).map(ent => ent.topMesh);
+            const gHits = raycaster.intersectObjects(groundMeshes, false);
+            if (gHits.length > 0) {
+              const hit = gHits[0];
+              const targetIslandId = hit.object.userData.islandId;
+              const ent = islandEntities.get(targetIslandId);
+              const lx = hit.point.x - ent.group.position.x;
+              const lz = hit.point.z - ent.group.position.z;
+              const item = appState.customProps.find(p => p.uid === appState.selectedPropUid);
+              const cat = BUILDABLE_CATALOG.find(c => c.id === item.type);
+
+              if (!checkPlacementValid(targetIslandId, lx, lz, cat ? cat.radius : 0.7, item.uid)) {
+                showToast('目標位置有障礙物或超出邊界，無法移動至此！', 'error');
+                return;
+              }
+              pushUndoSnapshot();
+              item.islandId = targetIslandId;
+              item.x = lx;
+              item.z = lz;
+              saveBuilds();
+              rebuildAllCustomProps();
+              showToast('已成功移動物件位置！', 'success');
+            }
+          }
+          return;
+        }
+      }
+
+      // 3. 一般探索模式：檢測點擊 NPC 或島嶼
+      const hits = raycaster.intersectObjects(clickableMeshes, false);
+      if (hits.length > 0) {
+        const userData = hits[0].object.userData;
+        if (userData.type === 'npc') {
+          focusOnNPC(userData.islandId, userData.npcIndex);
+        } else if (userData.islandId) {
+          focusOnIsland(userData.islandId);
+        }
+      }
+    });
+
+    // =========================================================================
+    // 第七階段：島嶼百科、NPC 對話、問答挑戰與UI渲染邏輯
+    // =========================================================================
+    window.focusOnIsland = (islandId, openPanel = true) => {
+      const ent = islandEntities.get(islandId);
+      if (!ent) return;
+      appState.selectedIslandId = islandId;
+
+      const pos = ent.group.position;
+      flyCameraTo(
+        new THREE.Vector3(pos.x, pos.y + 8.5, pos.z + 13.5),
+        new THREE.Vector3(pos.x, pos.y + 1.2, pos.z)
+      );
+
+      renderIslandListUI();
+      if (openPanel) {
+        renderIslandDetailView(ent.data);
+        openRightMode('info');
+      }
+    };
+
+    function focusOnNPC(islandId, npcIndex) {
+      const ent = islandEntities.get(islandId);
+      if (!ent || !ent.npcs[npcIndex]) return;
+      const npc = ent.npcs[npcIndex];
+      npc.state = 'wave';
+      npc.stateTimer = 3.5;
+
+      const worldPos = new THREE.Vector3();
+      npc.mesh.getWorldPosition(worldPos);
+      flyCameraTo(
+        new THREE.Vector3(worldPos.x, worldPos.y + 3.2, worldPos.z + 5.5),
+        new THREE.Vector3(worldPos.x, worldPos.y + 0.9, worldPos.z)
+      );
+
+      renderNPCDialogView(ent.data, npc.info);
+      openRightMode('info');
+    }
+
+    window.resetCameraOverview = () => {
+      flyCameraTo(DEFAULT_CAM_POS, DEFAULT_CAM_TARGET);
+      showToast('已切換至全星系俯瞰視角', 'info');
+    };
+
+    // 渲染島嶼詳細百科與三選一互動任務
+    function renderIslandDetailView(data) {
+      const isCompleted = appState.completedIslands.includes(data.id);
+      const containerEl = document.getElementById('view-info');
+
+      containerEl.innerHTML = `
+        <div class="space-y-4">
+          <!-- 標題與徽章狀態 -->
+          <div class="flex items-start justify-between gap-2">
+            <div>
+              <span class="text-[11px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-purple-600/50 text-purple-200 border border-purple-400/30">
+                ${data.enName}
+              </span>
+              <h2 class="text-xl font-black text-white mt-1.5">${data.name}</h2>
+            </div>
+            <div class="flex flex-col items-center bg-slate-900/90 border ${isCompleted ? 'border-amber-400' : 'border-slate-700'} rounded-2xl px-3 py-2 shrink-0">
+              <span class="text-2xl ${isCompleted ? '' : 'grayscale opacity-50'}">${data.badgeIcon}</span>
+              <span class="text-[10px] font-bold mt-0.5 ${isCompleted ? 'text-amber-300' : 'text-slate-400'}">
+                ${isCompleted ? '已獲得徽章' : '未解鎖徽章'}
+              </span>
+            </div>
+          </div>
+
+          <!-- 真實 NASA/ESA/JAXA 攝影照片 (附備用顯示與作者授權) -->
+          <div class="rounded-2xl overflow-hidden border border-purple-400/30 bg-slate-950">
+            <img src="${data.photoUrl}" alt="${data.name}"
+              onerror="this.onerror=null;this.src='https://placehold.co/640x360/1e1b4b/e0e7ff?text=${encodeURIComponent(data.name)}';"
+              class="w-full h-44 object-cover" />
+            <div class="p-2.5 bg-slate-900/95 text-[11px] text-slate-300 flex flex-col gap-1">
+              <span><i class="fa-solid fa-camera text-cyan-400 mr-1"></i>來源授權：${data.photoCredit}</span>
+              <a href="${data.sourceUrl}" target="_blank" rel="noopener noreferrer"
+                class="text-amber-300 hover:text-amber-200 font-bold inline-flex items-center gap-1 underline">
+                <i class="fa-solid fa-arrow-up-right-from-square"></i> 開啟官方原始資料頁 (${data.sourceName})
+              </a>
+            </div>
+          </div>
+
+          <!-- 簡介與科學背景 -->
+          <div class="glass-card rounded-2xl p-3.5 space-y-2.5 text-sm leading-relaxed text-slate-200">
+            <h3 class="font-bold text-cyan-300 text-xs flex items-center gap-1.5">
+              <i class="fa-solid fa-satellite"></i> 任務簡介
+            </h3>
+            <p>${data.summary}</p>
+            <h3 class="font-bold text-purple-300 text-xs flex items-center gap-1.5 pt-1">
+              <i class="fa-solid fa-microscope"></i> 科學背景知識
+            </h3>
+            <p class="text-xs text-slate-300">${data.background}</p>
+          </div>
+
+          <!-- 趣味小知識 -->
+          <div class="bg-amber-500/15 border border-amber-400/40 rounded-2xl p-3.5 text-xs text-amber-100">
+            <p class="font-bold text-amber-300 mb-1"><i class="fa-solid fa-lightbulb"></i> 太空趣味小知識</p>
+            <p>${data.funFact}</p>
+          </div>
+
+          <!-- 互動挑戰：三選一問答 -->
+          <div class="glass-card rounded-2xl p-4 border border-cyan-400/40 space-y-3">
+            <div class="flex items-center justify-between">
+              <h3 class="font-black text-sm text-cyan-300 flex items-center gap-1.5">
+                <i class="fa-solid fa-trophy text-amber-400"></i> 島嶼探索問答挑戰
+              </h3>
+              ${isCompleted ? '<span class="text-xs font-bold text-emerald-400"><i class="fa-solid fa-circle-check"></i> 挑戰完成</span>' : ''}
+            </div>
+            <p class="text-sm font-bold text-white">${data.quiz.question}</p>
+            <div class="space-y-2" id="quiz-options-box">
+              ${data.quiz.options.map((opt, idx) => `
+                <button onclick="submitIslandQuiz('${data.id}', ${idx})"
+                  class="game-btn w-full text-left p-3 rounded-xl bg-slate-800/90 hover:bg-indigo-700/80 border border-purple-400/30 text-xs font-bold text-slate-100 flex items-center gap-2.5">
+                  <span class="w-6 h-6 rounded-lg bg-purple-600/70 flex items-center justify-center shrink-0">${['A', 'B', 'C'][idx]}</span>
+                  <span>${opt}</span>
+                </button>
+              `).join('')}
+            </div>
+            <div id="quiz-feedback" class="hidden rounded-xl p-3 text-xs font-medium"></div>
+          </div>
+        </div>
+      `;
+    }
+
+    // 渲染 NPC 對話視圖
+    function renderNPCDialogView(islandData, npcInfo) {
+      const containerEl = document.getElementById('view-info');
+      containerEl.innerHTML = `
+        <div class="space-y-4">
+          <div class="bg-gradient-to-br from-indigo-900/90 to-purple-900/90 border border-purple-400/40 rounded-3xl p-4 space-y-3">
+            <div class="flex items-center gap-3">
+              <div class="w-12 h-12 rounded-2xl bg-slate-900 flex items-center justify-center text-2xl border border-cyan-400/40">
+                🧑‍🚀
+              </div>
+              <div>
+                <span class="text-xs font-bold text-cyan-300">${npcInfo.role}</span>
+                <h2 class="text-lg font-black text-white">${npcInfo.name}</h2>
+              </div>
+            </div>
+            <div class="bg-slate-950/75 rounded-2xl p-3.5 text-sm leading-relaxed text-amber-100 border border-amber-400/25">
+              「${npcInfo.greeting}」
+            </div>
+            <button onclick="focusOnIsland('${islandData.id}', true)"
+              class="game-btn w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 font-black text-sm flex items-center justify-center gap-2">
+              <i class="fa-solid fa-book-open"></i> 閱讀【${islandData.name}】百科與挑戰任務
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    // 問答提交處理
+    window.submitIslandQuiz = (islandId, selectedIdx) => {
+      const data = SPACE_ISLANDS_DATA.find(i => i.id === islandId);
+      if (!data) return;
+      const feedbackEl = document.getElementById('quiz-feedback');
+      feedbackEl.classList.remove('hidden', 'bg-emerald-500/20', 'text-emerald-200', 'border-emerald-400', 'bg-rose-500/20', 'text-rose-200', 'border-rose-400');
+
+      if (selectedIdx === data.quiz.answerIndex) {
+        feedbackEl.classList.add('bg-emerald-500/20', 'text-emerald-200', 'border', 'border-emerald-400');
+        feedbackEl.innerHTML = `<p class="font-black text-emerald-300 mb-1">🎉 答對了！獲得【${data.badgeName} ${data.badgeIcon}】徽章！</p><p>${data.quiz.explanation}</p>`;
+
+        if (!appState.completedIslands.includes(islandId)) {
+          appState.completedIslands.push(islandId);
+          saveProgress();
+          showToast(`恭喜解鎖成就徽章：${data.badgeIcon} ${data.badgeName}！`, 'success');
+        }
+      } else {
+        feedbackEl.classList.add('bg-rose-500/20', 'text-rose-200', 'border', 'border-rose-400');
+        feedbackEl.innerHTML = `<p class="font-bold text-rose-300">再試一次看看喔！提示就在上方的「任務簡介」與「科學背景」中。</p>`;
+      }
+    };
+
+    // =========================================================================
+    // 第八階段：自動導覽列車系統
+    // =========================================================================
+    window.startAutoTour = () => {
+      appState.tourActive = true;
+      appState.tourPaused = false;
+      appState.tourIndex = -1;
+      appState.tourTimer = 0;
+
+      document.getElementById('tour-idle-controls').classList.add('hidden');
+      document.getElementById('tour-active-controls').classList.remove('hidden');
+      document.getElementById('tour-status-text').textContent = '導覽中：俯瞰全星際群島';
+      flyCameraTo(DEFAULT_CAM_POS, DEFAULT_CAM_TARGET);
+      showToast('星際自動導覽已啟動！將依序帶您巡禮 10 座太空浮空島', 'info');
+    };
+
+    window.togglePauseTour = () => {
+      appState.tourPaused = !appState.tourPaused;
+      const btn = document.getElementById('tour-pause-btn');
+      btn.innerHTML = appState.tourPaused ? '<i class="fa-solid fa-play"></i>' : '<i class="fa-solid fa-pause"></i>';
+      showToast(appState.tourPaused ? '自動導覽已暫停' : '自動導覽繼續進行', 'info');
+    };
+
+    window.tourStep = (delta) => {
+      if (!appState.tourActive) return;
+      appState.tourIndex += delta;
+      if (appState.tourIndex < 0) appState.tourIndex = SPACE_ISLANDS_DATA.length - 1;
+      if (appState.tourIndex >= SPACE_ISLANDS_DATA.length) appState.tourIndex = 0;
+      appState.tourTimer = 0;
+
+      const targetIsland = SPACE_ISLANDS_DATA[appState.tourIndex];
+      document.getElementById('tour-status-text').textContent = `(${appState.tourIndex + 1}/10) ${targetIsland.name}`;
+      focusOnIsland(targetIsland.id, true);
+    };
+
+    window.stopAutoTour = () => {
+      appState.tourActive = false;
+      appState.tourPaused = false;
+      document.getElementById('tour-idle-controls').classList.remove('hidden');
+      document.getElementById('tour-active-controls').classList.add('hidden');
+      showToast('已結束自動導覽', 'info');
+    };
+
+    // =========================================================================
+    // 第九階段：介面控制 (左右面板收合、分頁切換、畫質切換、通知框)
+    // =========================================================================
+    window.toggleLeftSidebar = (collapse) => {
+      const sidebar = document.getElementById('left-sidebar');
+      const expandBtn = document.getElementById('expand-left-btn');
+      if (collapse) {
+        sidebar.classList.add('collapsed');
+        expandBtn.classList.remove('hidden');
+      } else {
+        sidebar.classList.remove('collapsed');
+        expandBtn.classList.add('hidden');
+      }
+    };
+
+    window.openRightMode = (tabName) => {
+      const panel = document.getElementById('right-panel');
+      panel.classList.remove('hidden-panel');
+      switchRightTab(tabName);
+    };
+
+    window.closeRightPanel = () => {
+      document.getElementById('right-panel').classList.add('hidden-panel');
+      previewGhost.visible = false;
+      appState.bridgeToolActive = false;
+      updateBridgeToolUI();
+    };
+
+    window.switchRightTab = (tabName) => {
+      appState.rightTab = tabName;
+      ['info', 'build', 'bridge'].forEach(t => {
+        const view = document.getElementById(`view-${t}`);
+        const btn = document.getElementById(`tab-${t}-btn`);
+        if (t === tabName) {
+          view.classList.remove('hidden');
+          btn.classList.add('bg-purple-600', 'text-white');
+          btn.classList.remove('bg-slate-800/80', 'text-slate-300');
+        } else {
+          view.classList.add('hidden');
+          btn.classList.remove('bg-purple-600', 'text-white');
+          btn.classList.add('bg-slate-800/80', 'text-slate-300');
+        }
+      });
+
+      if (tabName !== 'build') previewGhost.visible = false;
+      if (tabName !== 'bridge') {
+        appState.bridgeToolActive = false;
+        updateBridgeToolUI();
+      }
+      if (tabName === 'info' && !appState.selectedIslandId) {
+        renderIslandDetailView(SPACE_ISLANDS_DATA[0]);
+      }
+    };
+
+    window.setBuildSubMode = (mode) => {
+      appState.buildSubMode = mode;
+      const placeBtn = document.getElementById('build-mode-place');
+      const editBtn = document.getElementById('build-mode-edit');
+      if (mode === 'place') {
+        placeBtn.className = 'game-btn py-2 px-3 rounded-xl bg-emerald-600 text-white font-bold text-xs flex items-center justify-center gap-1.5';
+        editBtn.className = 'game-btn py-2 px-3 rounded-xl bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5';
+        appState.selectedPropUid = null;
+        updateSelectedPropUI();
+      } else {
+        editBtn.className = 'game-btn py-2 px-3 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5';
+        placeBtn.className = 'game-btn py-2 px-3 rounded-xl bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5';
+        previewGhost.visible = false;
+      }
+    };
+
+    window.selectCatalogItem = (id) => {
+      appState.selectedCatalogId = id;
+      setBuildSubMode('place');
+      updatePreviewGhostModel();
+      renderBuildCatalogUI();
+    };
+
+    window.toggleQualityMode = () => {
+      appState.qualityHigh = !appState.qualityHigh;
+      const btn = document.getElementById('quality-toggle-btn');
+      if (appState.qualityHigh) {
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        cloudsGroup.visible = true;
+        btn.textContent = '目前：高畫質';
+        showToast('已切換至高畫質模式（開啟即時陰影與星雲）', 'info');
+      } else {
+        renderer.setPixelRatio(1);
+        renderer.shadowMap.enabled = false;
+        cloudsGroup.visible = false;
+        btn.textContent = '目前：省電流暢';
+        showToast('已切換至省電流暢模式（適合手機與平板）', 'info');
+      }
+    };
+
+    function showToast(message, type = 'info') {
+      const containerEl = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      const colors = {
+        info: 'bg-indigo-900/95 border-indigo-400 text-indigo-100',
+        success: 'bg-emerald-900/95 border-emerald-400 text-emerald-100',
+        warning: 'bg-amber-900/95 border-amber-400 text-amber-100',
+        error: 'bg-rose-900/95 border-rose-400 text-rose-100'
+      };
+      toast.className = `toast-anim px-4 py-2.5 rounded-2xl border shadow-xl text-xs font-bold text-center backdrop-blur-md ${colors[type] || colors.info}`;
+      toast.textContent = message;
+      containerEl.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+      }, 3200);
+    }
+
+    // 初始化渲染左側進度、島嶼列表與建造選單
+    function updateProgressUI() {
+      const done = appState.completedIslands.length;
+      const total = SPACE_ISLANDS_DATA.length;
+      const pct = Math.round((done / total) * 100);
+
+      document.getElementById('progress-percent').textContent = `${pct}%`;
+      document.getElementById('progress-bar').style.width = `${pct}%`;
+      document.getElementById('completed-count').textContent = done;
+      document.getElementById('remaining-count').textContent = total - done;
+
+      const badgesGrid = document.getElementById('badges-grid');
+      badgesGrid.innerHTML = SPACE_ISLANDS_DATA.map(island => {
+        const unlocked = appState.completedIslands.includes(island.id);
+        return `
+          <button onclick="focusOnIsland('${island.id}', true)" title="${island.badgeName} (${unlocked ? '已解鎖' : '未解鎖'})"
+            class="aspect-square rounded-xl flex items-center justify-center text-lg border transition
+            ${unlocked ? 'bg-amber-400/20 border-amber-400 shadow-md scale-105' : 'bg-slate-900/70 border-slate-700/70 grayscale opacity-40'}">
+            ${island.badgeIcon}
+          </button>
+        `;
+      }).join('');
+      renderIslandListUI();
+    }
+
+    function renderIslandListUI() {
+      const list = document.getElementById('island-list');
+      list.innerHTML = SPACE_ISLANDS_DATA.map((island, idx) => {
+        const done = appState.completedIslands.includes(island.id);
+        const active = appState.selectedIslandId === island.id;
+        return `
+          <button onclick="focusOnIsland('${island.id}', true)"
+            class="w-full text-left px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-between transition
+            ${active ? 'bg-purple-600/80 text-white border border-purple-300/50' : 'bg-slate-900/60 hover:bg-slate-800/90 text-slate-200'}">
+            <span class="truncate pr-2">${idx + 1}. ${island.name}</span>
+            <span class="shrink-0">${done ? '<i class="fa-solid fa-circle-check text-emerald-400"></i>' : island.badgeIcon}</span>
+          </button>
+        `;
+      }).join('');
+    }
+
+    function renderBuildCatalogUI() {
+      const grid = document.getElementById('build-items-grid');
+      grid.innerHTML = BUILDABLE_CATALOG.map(item => {
+        const selected = appState.selectedCatalogId === item.id;
+        return `
+          <button onclick="selectCatalogItem('${item.id}')"
+            class="game-btn p-2.5 rounded-2xl border text-left flex items-center gap-2.5 transition
+            ${selected ? 'bg-indigo-600/90 border-amber-300 text-white' : 'bg-slate-900/75 border-slate-700/80 text-slate-200 hover:bg-slate-800'}">
+            <span class="text-xl">${item.icon}</span>
+            <span class="text-xs font-bold leading-tight">${item.name}</span>
+          </button>
+        `;
+      }).join('');
+    }
+
+    // 載入儲存的自建物件與橋梁
+    try {
+      const savedBuilds = JSON.parse(localStorage.getItem(STORAGE_KEY_BUILDS) || '[]');
+      if (Array.isArray(savedBuilds)) appState.customProps = savedBuilds;
+      const savedBridges = JSON.parse(localStorage.getItem(STORAGE_KEY_BRIDGES) || '[]');
+      if (Array.isArray(savedBridges)) appState.bridges = savedBridges;
+    } catch (err) {
+      console.warn('讀取本機儲存資料失敗', err);
+    }
+
+    updateProgressUI();
+    renderBuildCatalogUI();
+    rebuildAllCustomProps();
+    rebuildAllBridges();
+
+    // =========================================================================
+    // 第十階段：主動畫迴圈 (島嶼漂浮、NPC 避障巡邏與跨橋移動、鏡頭平滑飛行)
+    // =========================================================================
+    const clock = new THREE.Clock();
+
+    function updateNPCs(dt, elapsed) {
+      islandEntities.forEach(ent => {
+        const radiusLimit = ent.data.radius - 0.65;
+
+        ent.npcs.forEach(npc => {
+          // 1. 處理正在跨越星際橋梁的 NPC 狀態機
+          if (npc.bridgeState && npc.activeBridge) {
+            const br = npc.activeBridge;
+            const isForward = br.islandA === npc.currentIslandId;
+            const entryWorld = isForward ? br.startPt : br.endPt;
+            const exitWorld = isForward ? br.endPt : br.startPt;
+            const destIslandId = isForward ? br.islandB : br.islandA;
+            const destEnt = islandEntities.get(destIslandId);
+
+            if (npc.bridgeState === 'crossing') {
+              // 在世界座標下沿著橋面行走
+              const pos = npc.mesh.position;
+              const toExit = new THREE.Vector3().subVectors(exitWorld, pos);
+              toExit.y = 0;
+              const dist = toExit.length();
+
+              if (dist < 0.35) {
+                // 抵達終點島嶼，將 NPC 掛載回目標島嶼群組
+                npc.currentIslandId = destIslandId;
+                npc.bridgeState = null;
+                npc.activeBridge = null;
+                destEnt.group.add(npc.mesh);
+                npc.mesh.position.set(
+                  exitWorld.x - destEnt.group.position.x,
+                  0.07,
+                  exitWorld.z - destEnt.group.position.z
+                );
+                npc.targetPos.set(0, 0.07, 0);
+              } else {
+                toExit.normalize();
+                pos.addScaledVector(toExit, npc.speed * 1.15 * dt);
+                pos.y = exitWorld.y + 0.05 + Math.abs(Math.sin(elapsed * 9)) * 0.06;
+                npc.mesh.lookAt(pos.x + toExit.x, pos.y, pos.z + toExit.z);
+              }
+              return;
+            }
+          }
+
+          // 2. 島內日常行為狀態機 (walk / idle / wave)
+          npc.stateTimer -= dt;
+          if (npc.stateTimer <= 0) {
+            // 若所在島嶼連接了橋梁，25% 機率決定跨橋拜訪鄰居島嶼！
+            const connectedBridges = appState.bridges.filter(
+              b => b.islandA === npc.currentIslandId || b.islandB === npc.currentIslandId
+            );
+            if (connectedBridges.length > 0 && Math.random() < 0.25) {
+              const chosenBridge = connectedBridges[Math.floor(Math.random() * connectedBridges.length)];
+              const isForward = chosenBridge.islandA === npc.currentIslandId;
+              const entryWorld = isForward ? chosenBridge.startPt : chosenBridge.endPt;
+
+              // 切換至世界場景座標開始過橋
+              const worldPos = new THREE.Vector3();
+              npc.mesh.getWorldPosition(worldPos);
+              scene.add(npc.mesh);
+              npc.mesh.position.copy(entryWorld);
+              npc.mesh.position.y += 0.05;
+              npc.activeBridge = chosenBridge;
+              npc.bridgeState = 'crossing';
+              return;
+            }
+
+            // 一般島內狀態切換
+            const roll = Math.random();
+            if (roll < 0.65) {
+              npc.state = 'walk';
+              npc.stateTimer = 2.5 + Math.random() * 3;
+              // 挑選一個安全無障礙的目標點
+              for (let attempt = 0; attempt < 12; attempt++) {
+                const ang = Math.random() * Math.PI * 2;
+                const r = 1.6 + Math.random() * (radiusLimit - 1.6);
+                const tx = Math.cos(ang) * r;
+                const tz = Math.sin(ang) * r;
+                if (checkPlacementValid(npc.currentIslandId, tx, tz, 0.45)) {
+                  npc.targetPos.set(tx, 0.07, tz);
+                  break;
+                }
+              }
+            } else if (roll < 0.85) {
+              npc.state = 'wave';
+              npc.stateTimer = 2.0;
+            } else {
+              npc.state = 'idle';
+              npc.stateTimer = 1.8;
+            }
+          }
+
+          // 執行動作動畫
+          const { leftArm, rightArm } = npc.mesh.userData;
+          if (npc.state === 'walk') {
+            const toTarget = new THREE.Vector3().subVectors(npc.targetPos, npc.mesh.position);
+            toTarget.y = 0;
+            const dist = toTarget.length();
+            if (dist > 0.2) {
+              toTarget.normalize();
+              const nextX = npc.mesh.position.x + toTarget.x * npc.speed * dt;
+              const nextZ = npc.mesh.position.z + toTarget.z * npc.speed * dt;
+              // 邊界與障礙物防穿透檢查
+              if (Math.hypot(nextX, nextZ) <= radiusLimit) {
+                npc.mesh.position.x = nextX;
+                npc.mesh.position.z = nextZ;
+                npc.mesh.position.y = 0.07 + Math.abs(Math.sin(elapsed * 8)) * 0.07;
+                const lookTarget = new THREE.Vector3(nextX + toTarget.x, npc.mesh.position.y, nextZ + toTarget.z);
+                npc.mesh.lookAt(ent.group.localToWorld(lookTarget));
+              } else {
+                npc.stateTimer = 0; // 碰到邊界立即重新尋路
+              }
+              leftArm.rotation.x = Math.sin(elapsed * 8) * 0.5;
+              rightArm.rotation.x = -Math.sin(elapsed * 8) * 0.5;
+              rightArm.rotation.z = 0;
+            } else {
+              npc.state = 'idle';
+              npc.stateTimer = 1.2;
+            }
+          } else if (npc.state === 'wave') {
+            npc.mesh.position.y = 0.07;
+            rightArm.rotation.z = Math.PI - 0.35 + Math.sin(elapsed * 10) * 0.35;
+            leftArm.rotation.x = 0;
+          } else {
+            npc.mesh.position.y = 0.07;
+            rightArm.rotation.z = 0;
+            leftArm.rotation.x = 0;
+            rightArm.rotation.x = 0;
+          }
+        });
+      });
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const dt = Math.min(clock.getDelta(), 0.05);
+      const elapsed = clock.getElapsedTime();
+
+      // 1. 星空微幅自轉與雲朵漂浮
+      starField.rotation.y = elapsed * 0.012;
+      if (cloudsGroup.visible) {
+        cloudsGroup.children.forEach(c => {
+          c.userData.angle += c.userData.speed * dt;
+          c.position.x = Math.cos(c.userData.angle) * c.userData.dist;
+          c.position.z = Math.sin(c.userData.angle) * c.userData.dist;
+          c.position.y = c.userData.baseY + Math.sin(elapsed + c.userData.angle * 3) * 0.4;
+        });
+      }
+
+      // 2. 浮空島上下漂浮與建築機械動畫
+      islandEntities.forEach(ent => {
+        const floatY = ent.data.position.y + Math.sin(elapsed * 1.15 + ent.floatOffset) * 0.28;
+        ent.group.position.y = floatY;
+
+        ent.animatedParts.forEach(part => {
+          if (part.type === 'spinX') part.mesh.rotation.x += part.speed * dt;
+          if (part.type === 'spinY') part.mesh.rotation.y += part.speed * dt;
+          if (part.type === 'spinZ') part.mesh.rotation.z += part.speed * dt;
+          if (part.type === 'hover') part.mesh.position.y = part.baseY + Math.sin(elapsed * part.speed) * 0.25;
+          if (part.type === 'pulseScale') {
+            const s = 1 + Math.sin(elapsed * part.speed) * 0.04;
+            part.mesh.scale.set(s, s, s);
+          }
+        });
+      });
+
+      // 同步自建物件跟隨島嶼漂浮高度
+      propMeshMap.forEach((mesh, uid) => {
+        const ent = islandEntities.get(mesh.userData.islandId);
+        if (ent) mesh.position.y = ent.group.position.y + 0.07;
+      });
+
+      // 3. 更新太空人 NPC 行為與跨橋移動
+      updateNPCs(dt, elapsed);
+
+      // 4. 自動導覽計時推進
+      if (appState.tourActive && !appState.tourPaused) {
+        appState.tourTimer += dt;
+        const duration = appState.tourIndex === -1 ? 3.5 : 6.5;
+        if (appState.tourTimer >= duration) {
+          tourStep(1);
+        }
+      }
+
+      // 5. 平滑鏡頭飛行插值
+      if (cameraAnim.active) {
+        camera.position.lerp(cameraAnim.targetPos, 0.055);
+        controls.target.lerp(cameraAnim.targetLook, 0.065);
+        if (camera.position.distanceTo(cameraAnim.targetPos) < 0.15) {
+          cameraAnim.active = false;
+        }
+      }
+
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    // 響應式視窗尺寸調整
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // 視窗載入完成後啟動主動畫迴圈
+    window.addEventListener('load', () => {
+      animate();
+    });
+  </script>
+</body>
+</html>
